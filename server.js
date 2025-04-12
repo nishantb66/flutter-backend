@@ -160,6 +160,33 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 
+// All Users endpoint: Returns all users from the main DB's "users" collection excluding the current user.
+app.get("/api/all-users", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const currentUserEmail = decoded.email;
+    if (!currentUserEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+
+    // Use the main connection (from mongoose.connection) to query the "users" collection.
+    const users = await mongoose.connection.db
+      .collection("users")
+      .find({ email: { $ne: currentUserEmail } })
+      .toArray();
+
+    return res.status(200).json({ users });
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // My Leaves endpoint
 app.get("/api/my-leaves", async (req, res) => {
   try {
