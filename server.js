@@ -41,7 +41,7 @@ mongoose
     process.exit(1);
   });
 
-// Create a separate connection for portal leaves using portal_mongo_uri.
+// Create a separate connection for portal data (leaves and reimbursements)
 const portalConnection = mongoose.createConnection(portal_mongo_uri, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -155,7 +155,7 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 
-// My Leaves endpoint: returns leave records for the logged-in user using a different MongoDB URI.
+// My Leaves endpoint: returns leave records for the logged-in user.
 // This uses the portalConnection and explicitly selects the 'test' database.
 app.get("/api/my-leaves", async (req, res) => {
   try {
@@ -179,6 +179,34 @@ app.get("/api/my-leaves", async (req, res) => {
     return res.status(200).json({ leaves });
   } catch (error) {
     console.error("Error fetching leaves:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// My Reimbursements endpoint: returns reimbursement records for the logged-in user.
+// This uses the same portalConnection (with the "test" database) and queries the "reimbursements" collection.
+app.get("/api/my-reimbursements", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userEmail = decoded.email;
+    if (!userEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+
+    const testDb = portalConnection.useDb("test");
+    const reimbursements = await testDb
+      .collection("reimbursements")
+      .find({ email: userEmail })
+      .toArray();
+
+    return res.status(200).json({ reimbursements });
+  } catch (error) {
+    console.error("Error fetching reimbursements:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
