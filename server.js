@@ -41,7 +41,7 @@ mongoose
     process.exit(1);
   });
 
-// Create a separate connection for portal data (leaves and reimbursements)
+// Create a separate connection for portal data (leaves, reimbursements, tasks)
 const portalConnection = mongoose.createConnection(portal_mongo_uri, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -91,7 +91,7 @@ app.post("/api/login", async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
-    // Include email in the token payload
+    // Include email in the token payload.
     const token = jwt.sign(
       { userId: user._id, username: user.username, email: user.email },
       JWT_SECRET,
@@ -156,7 +156,7 @@ app.post("/api/reset-password", async (req, res) => {
 });
 
 // My Leaves endpoint: returns leave records for the logged-in user.
-// This uses the portalConnection and explicitly selects the 'test' database.
+// Uses the portalConnection and explicitly selects the 'test' database.
 app.get("/api/my-leaves", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -184,7 +184,7 @@ app.get("/api/my-leaves", async (req, res) => {
 });
 
 // My Reimbursements endpoint: returns reimbursement records for the logged-in user.
-// This uses the same portalConnection (with the "test" database) and queries the "reimbursements" collection.
+// Uses the portalConnection (with the 'test' database) and queries the "reimbursements" collection.
 app.get("/api/my-reimbursements", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -207,6 +207,39 @@ app.get("/api/my-reimbursements", async (req, res) => {
     return res.status(200).json({ reimbursements });
   } catch (error) {
     console.error("Error fetching reimbursements:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// New: My Tasks endpoint: returns task documents (from "assignment" collection)
+// for the logged-in user, using the portalConnection and the "test" database.
+app.get("/api/my-tasks", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userEmail = decoded.email;
+    if (!userEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+    const testDb = portalConnection.useDb("test");
+    // Here, we follow the pattern to return both tasks created by the user and tasks assigned to them.
+    const createdTasks = await testDb
+      .collection("assignment")
+      .find({ "createdBy.email": userEmail })
+      .toArray();
+    const assignedTasks = await testDb
+      .collection("assignment")
+      .find({ "assignedTo.email": userEmail })
+      .toArray();
+    return res
+      .status(200)
+      .json({ created: createdTasks, assigned: assignedTasks });
+  } catch (error) {
+    console.error("Error fetching tasks:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
