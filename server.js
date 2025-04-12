@@ -247,19 +247,19 @@ app.get("/api/my-tasks", async (req, res) => {
 });
 
 // Keep Alive / Ping Endpoint
-app.get("/ping", (req, res) => {
-  res.send("Hi");
-});
+// app.get("/ping", (req, res) => {
+//   res.send("Hi");
+// });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`Server running on port ${PORT}`);
+// });
 
-// Keep alive self-ping: Every 8 minutes, ping the /ping endpoint
-const selfPingUrl ="https://flutterapp-backend.onrender.com/ping";
-setInterval(() => {
-  fetch(selfPingUrl)
-    .then((response) => response.text())
-    .then((text) => console.log("Self ping response:", text))
-    .catch((err) => console.error("Self ping error:", err));
-}, 8 * 60 * 1000);
+// // Keep alive self-ping: Every 8 minutes, ping the /ping endpoint
+// const selfPingUrl ="https://flutterapp-backend.onrender.com/ping";
+// setInterval(() => {
+//   fetch(selfPingUrl)
+//     .then((response) => response.text())
+//     .then((text) => console.log("Self ping response:", text))
+//     .catch((err) => console.error("Self ping error:", err));
+// }, 8 * 60 * 1000);
