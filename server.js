@@ -269,6 +269,33 @@ app.get("/api/my-tasks", async (req, res) => {
 });
 
 // New: Conversations endpoint for Chat Summary
+// Chat History endpoint: returns all chat messages between the logged-in user and a specified partner.
+app.get("/api/chat-history", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userEmail = decoded.email;
+    if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
+    const partner = req.query.with;
+    if (!partner) return res.status(400).json({ message: "Chat partner required" });
+    const messages = await dbTest.collection("chats").find({
+      $or: [
+        { from: userEmail, to: partner },
+        { from: partner, to: userEmail }
+      ]
+    }).sort({ timestamp: 1 }).toArray();
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error fetching chat history:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Conversations endpoint for Chat Summary (aggregation for unread counts etc.)
 app.get("/api/conversations", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -278,69 +305,52 @@ app.get("/api/conversations", async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
     const userEmail = decoded.email;
-    if (!userEmail) {
-      return res.status(400).json({ message: "Invalid token: email missing" });
-    }
-    const testDb = portalConnection.useDb("test");
-    // Aggregate chatmessages to group by conversation (other party) and count unread messages.
-    const conversations = await testDb
-      .collection("chatmessages")
-      .aggregate([
-        { $match: { $or: [{ from: userEmail }, { to: userEmail }] } },
-        {
-          $project: {
-            other: { $cond: [{ $eq: ["$from", userEmail] }, "$to", "$from"] },
-            message: 1,
-            timestamp: 1,
-            read: 1,
-          },
+    if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
+    const conversations = await dbTest.collection("chats").aggregate([
+      { $match: { $or: [{ from: userEmail }, { to: userEmail }] } },
+      {
+        $project: {
+          other: { $cond: [{ $eq: ["$from", userEmail] }, "$to", "$from"] },
+          message: 1,
+          timestamp: 1,
+          read: 1,
         },
-        { $sort: { timestamp: -1 } },
-        {
-          $group: {
-            _id: "$other",
-            latestMessage: { $first: "$message" },
-            latestTimestamp: { $first: "$timestamp" },
-            unreadCount: {
-              $sum: {
-                $cond: [
-                  {
-                    $and: [
-                      { $eq: ["$to", userEmail] },
-                      { $eq: ["$read", false] },
-                    ],
-                  },
-                  1,
-                  0,
-                ],
-              },
+      },
+      { $sort: { timestamp: -1 } },
+      {
+        $group: {
+          _id: "$other",
+          latestMessage: { $first: "$message" },
+          latestTimestamp: { $first: "$timestamp" },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ["$to", userEmail] }, { $eq: ["$read", false] }] },
+                1,
+                0,
+              ],
             },
           },
         },
-        // New lookup stage to get user details from Users collection
-        {
-          $lookup: {
-            from: "users",
-            localField: "_id", // _id is the other party's email from the grouping
-            foreignField: "email",
-            as: "userDetails",
-          },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "email",
+          as: "userDetails",
         },
-        // Add a field "username" extracted from userDetails
-        {
-          $addFields: {
-            username: { $arrayElemAt: ["$userDetails.username", 0] },
-          },
+      },
+      {
+        $addFields: {
+          username: { $arrayElemAt: ["$userDetails.username", 0] },
         },
-        // Remove the userDetails array from output
-        {
-          $project: { userDetails: 0 },
-        },
-
-        { $sort: { latestTimestamp: -1 } },
-      ])
-      .toArray();
-
+      },
+      {
+        $project: { userDetails: 0 },
+      },
+      { $sort: { latestTimestamp: -1 } },
+    ]).toArray();
     return res.status(200).json({ conversations });
   } catch (error) {
     console.error("Error fetching conversations:", error);
@@ -354,7 +364,7 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// Socket middleware: Authenticate socket connections using the token in query params.
+// Socket middleware: Authenticate socket connections using token from query.
 io.use((socket, next) => {
   const token = socket.handshake.query.token;
   if (token) {
@@ -372,12 +382,11 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   console.log("User connected via socket:", socket.user.email);
-  // Make the socket join a room with the user's email.
+  // Join a room corresponding to the user's email.
   socket.join(socket.user.email);
 
-  // Listen for chat messages.
+  // Listen for "chat message" events.
   socket.on("chat message", async (data) => {
-    // data: { to, message }
     const { to, message } = data;
     const chatMessage = {
       from: socket.user.email,
@@ -386,26 +395,21 @@ io.on("connection", (socket) => {
       timestamp: new Date(),
       read: false,
     };
-    // Store the message in the "chatmessages" collection.
-    const testDb = portalConnection.useDb("test");
-    await testDb.collection("chatmessages").insertOne(chatMessage);
+    // Store message in "chats" collection of the test database using main connection.
+    await dbTest.collection("chats").insertOne(chatMessage);
     // Emit the message to the recipient.
     io.to(to).emit("chat message", chatMessage);
-    // Also emit to sender so they see their message.
+    // Also emit it back to sender.
     socket.emit("chat message", chatMessage);
   });
 
-  // Mark messages as read.
+  // Listen for "mark read" events.
   socket.on("mark read", async (data) => {
-    // data: { from }
     const { from } = data;
-    const testDb = portalConnection.useDb("test");
-    await testDb
-      .collection("chatmessages")
-      .updateMany(
-        { from: from, to: socket.user.email, read: false },
-        { $set: { read: true } }
-      );
+    await dbTest.collection("chats").updateMany(
+      { from: from, to: socket.user.email, read: false },
+      { $set: { read: true } }
+    );
   });
 
   socket.on("disconnect", () => {
