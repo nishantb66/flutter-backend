@@ -335,9 +335,20 @@ app.post("/api/upload-image", upload.single("imageFile"), async (req, res) => {
   }
   console.log("Uploaded file mimetype:", req.file.mimetype);
 
-  // Allowed MIME types (adjust if necessary)
-  const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
-  if (!allowedTypes.includes(req.file.mimetype)) {
+  // Option 1: Update allowedTypes array to include more types
+  // const allowedTypes = [
+  //   "image/png",
+  //   "image/jpeg",
+  //   "image/jpg",
+  //   "image/heic",
+  //   "image/heif",
+  // ];
+  // if (!allowedTypes.includes(req.file.mimetype)) {
+  //   return res.status(400).json({ message: "Invalid image file type" });
+  // }
+
+  // Or Option 2: Check if it starts with "image/"
+  if (!req.file.mimetype.startsWith("image/")) {
     return res.status(400).json({ message: "Invalid image file type" });
   }
 
