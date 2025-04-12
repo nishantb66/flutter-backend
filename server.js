@@ -328,11 +328,14 @@ app.post("/api/upload-image", upload.single("imageFile"), async (req, res) => {
   if (!userEmail)
     return res.status(400).json({ message: "Invalid token: email missing" });
 
+  // Debug: Log the file info
+  console.log("req.file:", req.file);
   if (!req.file) {
     return res.status(400).json({ message: "No image file uploaded." });
   }
+  console.log("Uploaded file mimetype:", req.file.mimetype);
 
-  // Check allowed types
+  // Allowed MIME types (adjust if necessary)
   const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
   if (!allowedTypes.includes(req.file.mimetype)) {
     return res.status(400).json({ message: "Invalid image file type" });
@@ -440,7 +443,8 @@ app.post("/api/forget-image", async (req, res) => {
     return res.status(401).json({ message: "Invalid token" });
   }
   const userEmail = decoded.email;
-  if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
+  if (!userEmail)
+    return res.status(400).json({ message: "Invalid token: email missing" });
 
   try {
     await ImageUpload.deleteOne({ userEmail });
@@ -450,7 +454,6 @@ app.post("/api/forget-image", async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
