@@ -76,6 +76,7 @@ app.post("/api/register", async (req, res) => {
 });
 
 // Login endpoint
+// Login endpoint
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -88,9 +89,9 @@ app.post("/api/login", async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
-    // Create JWT token; include the username in the payload
+    // Create JWT token; include the email along with username in the payload
     const token = jwt.sign(
-      { userId: user._id, username: user.username },
+      { userId: user._id, username: user.username, email: user.email },
       JWT_SECRET,
       {
         expiresIn: "1h",
