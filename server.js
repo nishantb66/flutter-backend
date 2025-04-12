@@ -10,6 +10,7 @@ const nodemailer = require("nodemailer");
 
 const User = require("./models/User");
 const Otp = require("./models/Otp");
+const Feedback = require("./models/Feedback");
 
 const app = express();
 
@@ -241,6 +242,65 @@ app.get("/api/my-tasks", async (req, res) => {
   } catch (error) {
     console.error("Error fetching tasks:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// New: Feedback endpoint
+app.post("/api/feedback", async (req, res) => {
+  // Verify token from headers
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+  const userEmail = decoded.email;
+  if (!userEmail) {
+    return res.status(400).json({ message: "Invalid token: email missing" });
+  }
+
+  // Destructure feedback fields from request body
+  const {
+    enterpriseManagementSaaS,
+    userExperience,
+    intelligenceRating,
+    improvements,
+    enterprisePortalRating,
+  } = req.body;
+
+  // Basic validation of required fields (more advanced validation can be added)
+  if (
+    !enterpriseManagementSaaS ||
+    !userExperience ||
+    intelligenceRating == null ||
+    !improvements ||
+    enterprisePortalRating == null
+  ) {
+    return res
+      .status(400)
+      .json({ message: "Please provide all required feedback fields" });
+  }
+
+  try {
+    // Create and save the feedback document
+    const feedback = new Feedback({
+      userEmail,
+      enterpriseManagementSaaS,
+      userExperience,
+      intelligenceRating,
+      improvements,
+      enterprisePortalRating,
+    });
+    await feedback.save();
+    res.status(201).json({ message: "Feedback submitted successfully" });
+  } catch (err) {
+    console.error("Error submitting feedback:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
