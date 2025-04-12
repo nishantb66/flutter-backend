@@ -8,10 +8,6 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 
-// For real-time chat
-const http = require("http");
-const { Server } = require("socket.io");
-
 const User = require("./models/User");
 const Otp = require("./models/Otp");
 
@@ -36,7 +32,7 @@ if (!MONGODB_URI || !portal_mongo_uri || !JWT_SECRET || !EMAIL || !APP_PASS) {
   process.exit(1);
 }
 
-// Connect to the main MongoDB (for auth, etc.)
+// Connect to the main MongoDB (for auth and others)
 mongoose
   .connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log("Connected to main MongoDB"))
@@ -45,7 +41,7 @@ mongoose
     process.exit(1);
   });
 
-// Create a separate connection for portal data (leaves, reimbursements, tasks, chat)
+// Create a separate connection for portal data (leaves, reimbursements, tasks)
 const portalConnection = mongoose.createConnection(portal_mongo_uri, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -66,7 +62,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// ----- [Existing Endpoints] -----
 // Registration endpoint
 app.post("/api/register", async (req, res) => {
   const { username, email, password } = req.body;
@@ -96,7 +91,7 @@ app.post("/api/login", async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
-    // Include email in token payload.
+    // Include email in the token payload.
     const token = jwt.sign(
       { userId: user._id, username: user.username, email: user.email },
       JWT_SECRET,
@@ -110,7 +105,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// Forgot Password endpoint
+// Forgot password endpoint: send OTP email.
 app.post("/api/forgot-password", async (req, res) => {
   const { email } = req.body;
   try {
@@ -141,7 +136,7 @@ app.post("/api/forgot-password", async (req, res) => {
   }
 });
 
-// Reset Password endpoint
+// Reset password endpoint: verify OTP and update password.
 app.post("/api/reset-password", async (req, res) => {
   const { email, otp, newPassword } = req.body;
   try {
@@ -160,34 +155,8 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 
-// All Users endpoint: Returns all users from the main DB's "users" collection excluding the current user.
-app.get("/api/all-users", async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const currentUserEmail = decoded.email;
-    if (!currentUserEmail) {
-      return res.status(400).json({ message: "Invalid token: email missing" });
-    }
-
-    // Use the main connection (from mongoose.connection) to query the "users" collection.
-    const users = await mongoose.connection.db
-      .collection("users")
-      .find({ email: { $ne: currentUserEmail } })
-      .toArray();
-
-    return res.status(200).json({ users });
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// My Leaves endpoint
+// My Leaves endpoint: returns leave records for the logged-in user.
+// Uses the portalConnection and explicitly selects the 'test' database.
 app.get("/api/my-leaves", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -200,11 +169,13 @@ app.get("/api/my-leaves", async (req, res) => {
     if (!userEmail) {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
+
     const testDb = portalConnection.useDb("test");
     const leaves = await testDb
       .collection("leaves")
       .find({ userEmail })
       .toArray();
+
     return res.status(200).json({ leaves });
   } catch (error) {
     console.error("Error fetching leaves:", error);
@@ -212,7 +183,8 @@ app.get("/api/my-leaves", async (req, res) => {
   }
 });
 
-// My Reimbursements endpoint
+// My Reimbursements endpoint: returns reimbursement records for the logged-in user.
+// Uses the portalConnection (with the 'test' database) and queries the "reimbursements" collection.
 app.get("/api/my-reimbursements", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -225,11 +197,13 @@ app.get("/api/my-reimbursements", async (req, res) => {
     if (!userEmail) {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
+
     const testDb = portalConnection.useDb("test");
     const reimbursements = await testDb
       .collection("reimbursements")
       .find({ email: userEmail })
       .toArray();
+
     return res.status(200).json({ reimbursements });
   } catch (error) {
     console.error("Error fetching reimbursements:", error);
@@ -237,7 +211,8 @@ app.get("/api/my-reimbursements", async (req, res) => {
   }
 });
 
-// My Tasks endpoint
+// New: My Tasks endpoint: returns task documents (from "assignment" collection)
+// for the logged-in user, using the portalConnection and the "test" database.
 app.get("/api/my-tasks", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -251,6 +226,7 @@ app.get("/api/my-tasks", async (req, res) => {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
     const testDb = portalConnection.useDb("test");
+    // Here, we follow the pattern to return both tasks created by the user and tasks assigned to them.
     const createdTasks = await testDb
       .collection("assignment")
       .find({ "createdBy.email": userEmail })
@@ -268,156 +244,6 @@ app.get("/api/my-tasks", async (req, res) => {
   }
 });
 
-// New: Conversations endpoint for Chat Summary
-// Chat History endpoint: returns all chat messages between the logged-in user and a specified partner.
-app.get("/api/chat-history", async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const userEmail = decoded.email;
-    if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
-    const partner = req.query.with;
-    if (!partner) return res.status(400).json({ message: "Chat partner required" });
-    const messages = await dbTest.collection("chats").find({
-      $or: [
-        { from: userEmail, to: partner },
-        { from: partner, to: userEmail }
-      ]
-    }).sort({ timestamp: 1 }).toArray();
-    return res.status(200).json({ messages });
-  } catch (error) {
-    console.error("Error fetching chat history:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// Conversations endpoint for Chat Summary (aggregation for unread counts etc.)
-app.get("/api/conversations", async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const userEmail = decoded.email;
-    if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
-    const conversations = await dbTest.collection("chats").aggregate([
-      { $match: { $or: [{ from: userEmail }, { to: userEmail }] } },
-      {
-        $project: {
-          other: { $cond: [{ $eq: ["$from", userEmail] }, "$to", "$from"] },
-          message: 1,
-          timestamp: 1,
-          read: 1,
-        },
-      },
-      { $sort: { timestamp: -1 } },
-      {
-        $group: {
-          _id: "$other",
-          latestMessage: { $first: "$message" },
-          latestTimestamp: { $first: "$timestamp" },
-          unreadCount: {
-            $sum: {
-              $cond: [
-                { $and: [{ $eq: ["$to", userEmail] }, { $eq: ["$read", false] }] },
-                1,
-                0,
-              ],
-            },
-          },
-        },
-      },
-      {
-        $lookup: {
-          from: "users",
-          localField: "_id",
-          foreignField: "email",
-          as: "userDetails",
-        },
-      },
-      {
-        $addFields: {
-          username: { $arrayElemAt: ["$userDetails.username", 0] },
-        },
-      },
-      {
-        $project: { userDetails: 0 },
-      },
-      { $sort: { latestTimestamp: -1 } },
-    ]).toArray();
-    return res.status(200).json({ conversations });
-  } catch (error) {
-    console.error("Error fetching conversations:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// ---------------- Socket.IO Integration for Real-time Chat ----------------
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" },
-});
-
-// Socket middleware: Authenticate socket connections using token from query.
-io.use((socket, next) => {
-  const token = socket.handshake.query.token;
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      socket.user = decoded;
-      next();
-    } catch (err) {
-      next(new Error("Authentication error"));
-    }
-  } else {
-    next(new Error("Authentication error"));
-  }
-});
-
-io.on("connection", (socket) => {
-  console.log("User connected via socket:", socket.user.email);
-  // Join a room corresponding to the user's email.
-  socket.join(socket.user.email);
-
-  // Listen for "chat message" events.
-  socket.on("chat message", async (data) => {
-    const { to, message } = data;
-    const chatMessage = {
-      from: socket.user.email,
-      to: to,
-      message: message,
-      timestamp: new Date(),
-      read: false,
-    };
-    // Store message in "chats" collection of the test database using main connection.
-    await dbTest.collection("chats").insertOne(chatMessage);
-    // Emit the message to the recipient.
-    io.to(to).emit("chat message", chatMessage);
-    // Also emit it back to sender.
-    socket.emit("chat message", chatMessage);
-  });
-
-  // Listen for "mark read" events.
-  socket.on("mark read", async (data) => {
-    const { from } = data;
-    await dbTest.collection("chats").updateMany(
-      { from: from, to: socket.user.email, read: false },
-      { $set: { read: true } }
-    );
-  });
-
-  socket.on("disconnect", () => {
-    console.log("User disconnected from socket:", socket.user.email);
-  });
-});
-
-// Start the server using Socket.IO server.
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
