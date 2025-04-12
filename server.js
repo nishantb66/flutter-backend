@@ -290,6 +290,26 @@ app.get("/api/conversations", async (req, res) => {
             },
           },
         },
+        // New lookup stage to get user details from Users collection
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id", // _id is the other party's email from the grouping
+            foreignField: "email",
+            as: "userDetails",
+          },
+        },
+        // Add a field "username" extracted from userDetails
+        {
+          $addFields: {
+            username: { $arrayElemAt: ["$userDetails.username", 0] },
+          },
+        },
+        // Remove the userDetails array from output
+        {
+          $project: { userDetails: 0 },
+        },
+
         { $sort: { latestTimestamp: -1 } },
       ])
       .toArray();
@@ -366,9 +386,7 @@ io.on("connection", (socket) => {
   });
 });
 
-
 // Start the server using Socket.IO server.
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
