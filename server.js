@@ -75,14 +75,16 @@ app.post("/api/login", async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
-    // Create JWT token
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    // Create JWT token; include the username in the payload
+    const token = jwt.sign(
+      { userId: user._id, username: user.username },
+      JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
 
-    res
-      .status(200)
-      .json({ message: "Login successful", token, username: user.username });
+    res.status(200).json({ message: "Login successful", token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
