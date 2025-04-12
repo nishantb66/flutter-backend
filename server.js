@@ -8,6 +8,9 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 
+// Require node-fetch (version 2.x)
+const fetch = require("node-fetch");
+
 const User = require("./models/User");
 const Otp = require("./models/Otp");
 
@@ -211,7 +214,7 @@ app.get("/api/my-reimbursements", async (req, res) => {
   }
 });
 
-// New: My Tasks endpoint: returns task documents (from "assignment" collection)
+// My Tasks endpoint: returns task documents (from "assignment" collection)
 // for the logged-in user, using the portalConnection and the "test" database.
 app.get("/api/my-tasks", async (req, res) => {
   try {
@@ -226,7 +229,6 @@ app.get("/api/my-tasks", async (req, res) => {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
     const testDb = portalConnection.useDb("test");
-    // Here, we follow the pattern to return both tasks created by the user and tasks assigned to them.
     const createdTasks = await testDb
       .collection("assignment")
       .find({ "createdBy.email": userEmail })
@@ -244,6 +246,20 @@ app.get("/api/my-tasks", async (req, res) => {
   }
 });
 
+// Keep Alive / Ping Endpoint
+app.get("/ping", (req, res) => {
+  res.send("Hi");
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Keep alive self-ping: Every 8 minutes, ping the /ping endpoint
+const selfPingUrl ="https://flutterapp-backend.onrender.com/ping";
+setInterval(() => {
+  fetch(selfPingUrl)
+    .then((response) => response.text())
+    .then((text) => console.log("Self ping response:", text))
+    .catch((err) => console.error("Self ping error:", err));
+}, 8 * 60 * 1000);
