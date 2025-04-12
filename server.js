@@ -12,6 +12,12 @@ const User = require("./models/User");
 const Otp = require("./models/Otp");
 const Feedback = require("./models/Feedback");
 
+const multer = require("multer");
+const upload = multer(); // using memory storage to keep the file in RAM
+const Groq = require("groq-sdk");
+const groq = new Groq({ apiKey: process.env.GROQ });
+const ImageUpload = require("./models/ImageUpload");
+
 const app = express();
 
 // Middleware
@@ -303,6 +309,148 @@ app.post("/api/feedback", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// POST /api/upload-image
+app.post("/api/upload-image", upload.single("imageFile"), async (req, res) => {
+  // Verify JWT token
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+  const userEmail = decoded.email;
+  if (!userEmail)
+    return res.status(400).json({ message: "Invalid token: email missing" });
+
+  if (!req.file) {
+    return res.status(400).json({ message: "No image file uploaded." });
+  }
+
+  // Check allowed types
+  const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    return res.status(400).json({ message: "Invalid image file type" });
+  }
+
+  try {
+    // Upsert the image document for the user
+    await ImageUpload.findOneAndUpdate(
+      { userEmail },
+      {
+        userEmail,
+        userName: decoded.username || "",
+        empId: decoded.empId || "",
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        imageBuffer: req.file.buffer,
+        updatedAt: new Date(),
+      },
+      { upsert: true, new: true }
+    );
+    return res.status(200).json({ message: "Image uploaded successfully." });
+  } catch (err) {
+    console.error("Error uploading image:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/image-chat
+app.post("/api/image-chat", async (req, res) => {
+  // Verify JWT token
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+  const userEmail = decoded.email;
+  if (!userEmail)
+    return res.status(400).json({ message: "Invalid token: email missing" });
+
+  // Expect messages from JSON body
+  const { messages } = req.body;
+  if (!messages) {
+    return res.status(400).json({ message: "No messages provided" });
+  }
+
+  try {
+    // Retrieve the user's image from the database
+    const imageDoc = await ImageUpload.findOne({ userEmail });
+    if (!imageDoc) {
+      return res
+        .status(400)
+        .json({ message: "No image uploaded. Please upload an image first." });
+    }
+    // Convert image buffer to base64 string
+    const base64String = imageDoc.imageBuffer.toString("base64");
+    // Build the message payload for the GROQ API
+    const messagePayload = {
+      role: "user",
+      content: [
+        { type: "text", text: messages[messages.length - 1]?.content || "" },
+        {
+          type: "image_url",
+          image_url: {
+            url: `data:${imageDoc.mimeType};base64,${base64String}`,
+          },
+        },
+      ],
+    };
+    // Call the GROQ API using the image model
+    const aiResponse = await groq.chat.completions.create({
+      messages: [messagePayload],
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      temperature: 1,
+      max_completion_tokens: 1024,
+      top_p: 1,
+      stream: false,
+      stop: null,
+    });
+    const finalAnswer = aiResponse.choices?.[0]?.message?.content.trim() || "";
+    return res.status(200).json({ message: finalAnswer });
+  } catch (err) {
+    console.error("Image chat error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/forget-image
+app.post("/api/forget-image", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+  const userEmail = decoded.email;
+  if (!userEmail) return res.status(400).json({ message: "Invalid token: email missing" });
+
+  try {
+    await ImageUpload.deleteOne({ userEmail });
+    return res.status(200).json({ message: "Image forgotten successfully." });
+  } catch (err) {
+    console.error("Error forgetting image:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
