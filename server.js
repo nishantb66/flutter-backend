@@ -689,7 +689,7 @@ app.post("/api/chat", async (req, res) => {
 
     // Prepend system messages: greeting and platform feature documentation.
     const greetingMessage = {
-      role: "system",
+      role: "assistant",
       content: `Hello ${userName}, your email is ${userEmail}.`,
     };
     const platformMemory = {
