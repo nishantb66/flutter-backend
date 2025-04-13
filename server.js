@@ -625,6 +625,40 @@ app.get("/api/calendar/today", async (req, res) => {
   }
 });
 
+// GET /api/articles/latest
+// Fetch the latest 5 articles from the portal mongo URI ("test" database)
+// Requires a valid JWT token.
+app.get("/api/articles/latest", async (req, res) => {
+  try {
+    // Verify token presence and validity
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Please log in to view" });
+    }
+    const token = authHeader.split(" ")[1];
+    try {
+      jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Please log in to view" });
+    }
+
+    // Use the "test" database on portalConnection to fetch articles
+    const testDb = portalConnection.useDb("test");
+    const articlesCollection = testDb.collection("articles");
+
+    // Query the latest 5 articles sorted descending by createdAt
+    const articles = await articlesCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    return res.status(200).json({ articles });
+  } catch (error) {
+    console.error("Error fetching latest articles:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
