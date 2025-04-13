@@ -417,6 +417,63 @@ app.post("/api/meeting", async (req, res) => {
   }
 });
 
+// In your teams route GET endpoint – add the following code before the final "if no recognized query" return.
+const myTeamParam = searchParams.get("myTeam");
+if (myTeamParam === "1") {
+  // Search for a team where the user is either the leader or a member.
+  const team = await teamsCollection.findOne({
+    $or: [{ leaderEmail: email }, { "members.email": email }],
+  });
+  if (!team) {
+    return NextResponse.json({ inTeam: false }, { status: 200 });
+  }
+
+  // Get leader name from the users collection of the main database.
+  const leaderDoc = await usersCollection.findOne({ email: team.leaderEmail });
+  const leaderName = leaderDoc?.name || team.leaderEmail;
+
+  // For each member in the team, look up the name from the users collection.
+  const membersWithNames =
+    team.members && team.members.length > 0
+      ? await Promise.all(
+          team.members.map(async (member) => {
+            const memberDoc = await usersCollection.findOne({
+              email: member.email,
+            });
+            return {
+              email: member.email,
+              name: memberDoc?.name || member.email,
+              invitedAt: member.invitedAt,
+              canAddMembers: !!member.canAddMembers,
+            };
+          })
+        )
+      : [];
+
+  // Build the response object with all desired fields.
+  const responseTeam = {
+    teamName: team.teamName,
+    teamDescription: team.teamDescription,
+    leaderEmail: team.leaderEmail,
+    leaderName: leaderName,
+    members: membersWithNames,
+    createdAt: team.createdAt,
+    notice: team.notice,
+    joinRequests: team.joinRequests || [],
+  };
+
+  const isLeader = team.leaderEmail === email;
+
+  return NextResponse.json(
+    {
+      inTeam: true,
+      isLeader: isLeader,
+      team: responseTeam,
+    },
+    { status: 200 }
+  );
+}
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
