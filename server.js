@@ -687,9 +687,9 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ message: "Invalid messages payload" });
     }
 
-    // Prepend system messages: greeting and platform feature documentation.
+    // Prepend system messages: both messages must have an allowed role.
     const greetingMessage = {
-      role: "assistant",
+      role: "system",
       content: `Hello ${userName}, your email is ${userEmail}.`,
     };
     const platformMemory = {
@@ -718,6 +718,9 @@ Conclusion
 Enterprise Portal streamlines workplace operations through integrated features with AI assistance, designed to evolve into a comprehensive enterprise resource management system.
 Developed by: Nishant Baruah`,
     };
+
+    // Make sure that client messages use a valid role (typically "user").
+    // Prepend our system messages to the client messages.
     const allMessages = [greetingMessage, platformMemory, ...userMessages];
 
     // Call the AI chat completion via groq.
@@ -727,12 +730,13 @@ Developed by: Nishant Baruah`,
       temperature: 1,
       max_completion_tokens: 1024,
       top_p: 1,
-      stream: false, // gather entire reply at once
+      stream: false, // No streaming; the entire response comes at once.
       stop: null,
     });
 
-    // Because stream = false, chatCompletion is NOT an async iterator.
-    // The entire response is in chatCompletion.choices:
+    // Since stream is false, chatCompletion is a plain JSON object.
+    // Extract the reply from chatCompletion. The structure may vary depending on groq-sdk,
+    // but usually the reply is in chatCompletion.choices[0].message.content.
     let reply = chatCompletion?.choices?.[0]?.message?.content || "";
     return res.status(200).json({ reply });
   } catch (error) {
