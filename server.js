@@ -550,7 +550,7 @@ app.get("/api/calendar/today", async (req, res) => {
     const calendarEvents = db.collection("calendarEvents");
 
     // Check token
-    const authHeader = req.headers.get("authorization");
+    const authHeader = req.headers.authorization;;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No auth token" });
     }
