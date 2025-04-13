@@ -661,12 +661,30 @@ app.get("/api/articles/latest", async (req, res) => {
   }
 });
 
-// AI chat feature
+// =========== AI Chat Feature ===========
+// Create the Groq instance with your API key
 const groq = new Groq({ apiKey: process.env.GROQ });
+
+// Helper: forcibly map invalid roles to one of "system", "assistant", or "user".
+function sanitizeRole(role) {
+  switch (role) {
+    case "system":
+    case "assistant":
+    case "user":
+      return role;
+    case "ai":
+    case "bot":
+      // If your code used "ai" or "bot" for the assistant, fix it:
+      return "assistant";
+    default:
+      // If the role is unknown or missing, assume it's a user message:
+      return "user";
+  }
+}
 
 app.post("/api/chat", async (req, res) => {
   try {
-    // Authenticate the user.
+    // 1. Verify token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Please log in to view" });
@@ -681,13 +699,20 @@ app.post("/api/chat", async (req, res) => {
     const userName = decoded.username || "User";
     const userEmail = decoded.email || "";
 
-    // Get the conversation messages from the request.
+    // 2. Parse the incoming messages array
     const userMessages = req.body.messages;
     if (!Array.isArray(userMessages)) {
       return res.status(400).json({ message: "Invalid messages payload" });
     }
 
-    // Prepend system messages: both messages must have an allowed role.
+    // 3. Sanitize roles in user's messages
+    const sanitizedUserMessages = userMessages.map((msg) => ({
+      ...msg,
+      role: sanitizeRole(msg.role),
+    }));
+
+    // 4. Build the top-level system instructions
+    //    Use allowed roles: "system", "assistant", or "user"
     const greetingMessage = {
       role: "system",
       content: `Hello ${userName}, your email is ${userEmail}.`,
@@ -719,25 +744,26 @@ Enterprise Portal streamlines workplace operations through integrated features w
 Developed by: Nishant Baruah`,
     };
 
-    // Make sure that client messages use a valid role (typically "user").
-    // Prepend our system messages to the client messages.
-    const allMessages = [greetingMessage, platformMemory, ...userMessages];
+    // 5. Combine everything
+    const allMessages = [
+      greetingMessage,
+      platformMemory,
+      ...sanitizedUserMessages,
+    ];
 
-    // Call the AI chat completion via groq.
+    // 6. Call Groq with "stream": false => single JSON result
     const chatCompletion = await groq.chat.completions.create({
       messages: allMessages,
       model: "llama3-70b-8192",
       temperature: 1,
       max_completion_tokens: 1024,
       top_p: 1,
-      stream: false, // No streaming; the entire response comes at once.
+      stream: false,
       stop: null,
     });
 
-    // Since stream is false, chatCompletion is a plain JSON object.
-    // Extract the reply from chatCompletion. The structure may vary depending on groq-sdk,
-    // but usually the reply is in chatCompletion.choices[0].message.content.
-    let reply = chatCompletion?.choices?.[0]?.message?.content || "";
+    // 7. For non-streaming, the entire response is in chatCompletion.choices.
+    const reply = chatCompletion?.choices?.[0]?.message?.content || "";
     return res.status(200).json({ reply });
   } catch (error) {
     console.error("Chat error:", error);
