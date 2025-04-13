@@ -625,6 +625,66 @@ app.get("/api/calendar/today", async (req, res) => {
   }
 });
 
+// New: POST /api/notification
+app.post("/api/notification", async (req, res) => {
+  try {
+    // Verify token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userEmail = decoded.email;
+
+    // Define a fixed notification message
+    const notificationMessage = "An article is published by a user";
+
+    // Use portalConnection to connect to the 'test' database and the notifications collection
+    const testDb = portalConnection.useDb("test");
+    const notifications = testDb.collection("notifications");
+
+    // Create a notification record with fixed message text
+    const notification = {
+      recipientEmail: userEmail,
+      message: notificationMessage,
+      createdAt: new Date(),
+      read: false,
+    };
+
+    await notifications.insertOne(notification);
+    return res.status(201).json({ message: "Notification stored" });
+  } catch (err) {
+    console.error("Error in /api/notification:", err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+// New: GET /api/notification -- fetch notifications for the logged-in user
+app.get("/api/notification", async (req, res) => {
+  try {
+    // Verify token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userEmail = decoded.email;
+
+    const testDb = portalConnection.useDb("test");
+    const notifications = testDb.collection("notifications");
+
+    // Fetch all notifications for this user that are unread
+    const notifs = await notifications.find({ recipientEmail: userEmail, read: false }).sort({ createdAt: -1 }).toArray();
+    return res.status(200).json({ notifications: notifs });
+  } catch (err) {
+    console.error("Error fetching notifications:", err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
