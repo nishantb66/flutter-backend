@@ -546,21 +546,28 @@ app.get("/api/teams", async (req, res) => {
 // New endpoint to fetch today's calendar events for the logged-in user
 app.get("/api/calendar/today", async (req, res) => {
   try {
-    const db = portalConnection.useDb("test");
-    const calendarEvents = db.collection("calendarEvents");
+    // 1) Use portalConnection => test => calendarEvents collection
+    const calendarEvents = portalConnection
+      .useDb("test")
+      .collection("calendarEvents");
 
-    // Check token
-    const authHeader = req.headers.authorization;;
+    // 2) Verify token
+    const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No auth token" });
     }
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
     const userEmail = decoded.email;
 
-    // Calculate the current day boundaries in IST.
-    // 1. Get current time and convert it to IST by using the toLocaleString() trick.
+    // 3) Get the current date in IST (Asia/Kolkata)
     const now = new Date();
+    // Convert to a Date object in IST:
     const nowIST = new Date(
       now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
     );
@@ -568,27 +575,27 @@ app.get("/api/calendar/today", async (req, res) => {
     const month = nowIST.getMonth();
     const day = nowIST.getDate();
 
-    // Start and end of day in IST (local date interpreted as IST)
-    const startOfDayIST = new Date(year, month, day, 0, 0, 0);
+    // Define the start and end of *today* in IST
+    const startOfDayIST = new Date(year, month, day, 0, 0, 0, 0);
     const endOfDayIST = new Date(year, month, day, 23, 59, 59, 999);
 
-    // Convert these IST boundaries to UTC.
-    // IST is UTC +5:30, so subtract 5.5 hours to get UTC boundaries.
+    // Convert these IST boundaries to their UTC equivalents for querying
+    // Since IST = UTC+5:30, subtract 5.5 hours worth of milliseconds
     const offsetMillis = 5.5 * 60 * 60 * 1000;
     const startUTC = new Date(startOfDayIST.getTime() - offsetMillis);
     const endUTC = new Date(endOfDayIST.getTime() - offsetMillis);
 
-    // Query events for the logged in user that are scheduled today.
-    // Assumes that the "date" field is stored as a Date in MongoDB.
+    // 4) Find all events for this user that fall within today's date boundaries (UTC)
+    //    We assume the "date" field in MongoDB is stored as a proper Date object.
     const events = await calendarEvents
       .find({
         email: userEmail,
         date: { $gte: startUTC, $lte: endUTC },
       })
-      .sort({ date: 1 }) // sort by date ascending
+      .sort({ date: 1 }) // sort ascending by date
       .toArray();
 
-    // Convert times to IST before returning (for display)
+    // 5) Convert relevant fields back to IST for display
     const eventsIST = events.map((ev) => ({
       ...ev,
       createdAt: ev.createdAt
@@ -606,7 +613,9 @@ app.get("/api/calendar/today", async (req, res) => {
             timeZone: "Asia/Kolkata",
           })
         : null,
-      // Optionally, you can leave the 'date' field as well if needed.
+      // The "date" field will remain as a Date in UTC by default
+      // but you can also convert it if you'd like:
+      // date: new Date(ev.date).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
     }));
 
     return res.status(200).json({ events: eventsIST });
