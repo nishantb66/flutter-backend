@@ -555,7 +555,7 @@ app.get("/api/calendar/today", async (req, res) => {
       return res.status(401).json({ message: "No auth token" });
     }
     const token = authHeader.split(" ")[1];
-    const decoded = verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userEmail = decoded.email;
 
     // Calculate the current day boundaries in IST.
