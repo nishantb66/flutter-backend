@@ -727,15 +727,13 @@ Developed by: Nishant Baruah`,
       temperature: 1,
       max_completion_tokens: 1024,
       top_p: 1,
-      stream: true, // now returns async iterator
+      stream: false, // gather entire reply at once
       stop: null,
     });
 
-    let reply = "";
-    for await (const chunk of chatCompletion) {
-      // chunk.choices[0].delta.content contains the partial token
-      reply += chunk.choices[0]?.delta?.content || "";
-    }
+    // Because stream = false, chatCompletion is NOT an async iterator.
+    // The entire response is in chatCompletion.choices:
+    let reply = chatCompletion?.choices?.[0]?.message?.content || "";
     return res.status(200).json({ reply });
   } catch (error) {
     console.error("Chat error:", error);
