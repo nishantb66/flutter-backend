@@ -546,7 +546,7 @@ app.get("/api/teams", async (req, res) => {
 // New endpoint to fetch today's calendar events for the logged-in user
 app.get("/api/calendar/today", async (req, res) => {
   try {
-    const db = await connectToDB();
+    const db = portalConnection.useDb("test");
     const calendarEvents = db.collection("calendarEvents");
 
     // Check token
