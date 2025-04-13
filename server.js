@@ -417,62 +417,93 @@ app.post("/api/meeting", async (req, res) => {
   }
 });
 
-// In your teams route GET endpoint – add the following code before the final "if no recognized query" return.
-const myTeamParam = searchParams.get("myTeam");
-if (myTeamParam === "1") {
-  // Search for a team where the user is either the leader or a member.
-  const team = await teamsCollection.findOne({
-    $or: [{ leaderEmail: email }, { "members.email": email }],
-  });
-  if (!team) {
-    return NextResponse.json({ inTeam: false }, { status: 200 });
+// Add this GET endpoint to fetch the logged-in user's team details
+app.get("/api/teams", async (req, res) => {
+  try {
+    // Get the token from the authorization header.
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (error) {
+      return res.status(401).json({ message: "Token expired or invalid" });
+    }
+    const email = decoded.email;
+
+    // Check for the myTeam=1 query parameter
+    if (req.query.myTeam === "1") {
+      // Use the portal connection to access the 'test' database and the teams collection.
+      const testDb = portalConnection.useDb("test");
+      const teamsCollection = testDb.collection("teams");
+
+      // Find a team where the user is either the leader or a member.
+      const team = await teamsCollection.findOne({
+        $or: [{ leaderEmail: email }, { "members.email": email }],
+      });
+      if (!team) {
+        return res.status(200).json({ inTeam: false });
+      }
+
+      // Now, retrieve user details from the main MongoDB users collection.
+      // (Assumes that the main connection (mongoose.connect) has created a default DB.)
+      const usersCollection = mongoose.connection.db.collection("users");
+
+      // Get the leader's name
+      const leaderDoc = await usersCollection.findOne({
+        email: team.leaderEmail,
+      });
+      const leaderName =
+        leaderDoc && leaderDoc.name ? leaderDoc.name : team.leaderEmail;
+
+      // For each member, look up their name.
+      const membersWithNames =
+        team.members && team.members.length > 0
+          ? await Promise.all(
+              team.members.map(async (member) => {
+                const memberDoc = await usersCollection.findOne({
+                  email: member.email,
+                });
+                return {
+                  email: member.email,
+                  name:
+                    memberDoc && memberDoc.name ? memberDoc.name : member.email,
+                  invitedAt: member.invitedAt,
+                  canAddMembers: member.canAddMembers,
+                };
+              })
+            )
+          : [];
+
+      // Build the response team object with all required details.
+      const responseTeam = {
+        teamName: team.teamName,
+        teamDescription: team.teamDescription,
+        leaderEmail: team.leaderEmail,
+        leaderName: leaderName,
+        members: membersWithNames,
+        createdAt: team.createdAt,
+        notice: team.notice,
+        joinRequests: team.joinRequests || [],
+      };
+
+      // Determine if the logged in user is the team leader.
+      const isLeader = team.leaderEmail.toLowerCase() === email.toLowerCase();
+
+      return res
+        .status(200)
+        .json({ inTeam: true, isLeader: isLeader, team: responseTeam });
+    } else {
+      return res.status(400).json({ message: "Invalid query parameter" });
+    }
+  } catch (err) {
+    console.error("Error fetching team details:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
-
-  // Get leader name from the users collection of the main database.
-  const leaderDoc = await usersCollection.findOne({ email: team.leaderEmail });
-  const leaderName = leaderDoc?.name || team.leaderEmail;
-
-  // For each member in the team, look up the name from the users collection.
-  const membersWithNames =
-    team.members && team.members.length > 0
-      ? await Promise.all(
-          team.members.map(async (member) => {
-            const memberDoc = await usersCollection.findOne({
-              email: member.email,
-            });
-            return {
-              email: member.email,
-              name: memberDoc?.name || member.email,
-              invitedAt: member.invitedAt,
-              canAddMembers: !!member.canAddMembers,
-            };
-          })
-        )
-      : [];
-
-  // Build the response object with all desired fields.
-  const responseTeam = {
-    teamName: team.teamName,
-    teamDescription: team.teamDescription,
-    leaderEmail: team.leaderEmail,
-    leaderName: leaderName,
-    members: membersWithNames,
-    createdAt: team.createdAt,
-    notice: team.notice,
-    joinRequests: team.joinRequests || [],
-  };
-
-  const isLeader = team.leaderEmail === email;
-
-  return NextResponse.json(
-    {
-      inTeam: true,
-      isLeader: isLeader,
-      team: responseTeam,
-    },
-    { status: 200 }
-  );
-}
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
