@@ -543,6 +543,79 @@ app.get("/api/teams", async (req, res) => {
   }
 });
 
+// New endpoint to fetch today's calendar events for the logged-in user
+app.get("/api/calendar/today", async (req, res) => {
+  try {
+    const db = await connectToDB();
+    const calendarEvents = db.collection("calendarEvents");
+
+    // Check token
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "No auth token" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = verify(token, process.env.JWT_SECRET);
+    const userEmail = decoded.email;
+
+    // Calculate the current day boundaries in IST.
+    // 1. Get current time and convert it to IST by using the toLocaleString() trick.
+    const now = new Date();
+    const nowIST = new Date(
+      now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    const year = nowIST.getFullYear();
+    const month = nowIST.getMonth();
+    const day = nowIST.getDate();
+
+    // Start and end of day in IST (local date interpreted as IST)
+    const startOfDayIST = new Date(year, month, day, 0, 0, 0);
+    const endOfDayIST = new Date(year, month, day, 23, 59, 59, 999);
+
+    // Convert these IST boundaries to UTC.
+    // IST is UTC +5:30, so subtract 5.5 hours to get UTC boundaries.
+    const offsetMillis = 5.5 * 60 * 60 * 1000;
+    const startUTC = new Date(startOfDayIST.getTime() - offsetMillis);
+    const endUTC = new Date(endOfDayIST.getTime() - offsetMillis);
+
+    // Query events for the logged in user that are scheduled today.
+    // Assumes that the "date" field is stored as a Date in MongoDB.
+    const events = await calendarEvents
+      .find({
+        email: userEmail,
+        date: { $gte: startUTC, $lte: endUTC },
+      })
+      .sort({ date: 1 }) // sort by date ascending
+      .toArray();
+
+    // Convert times to IST before returning (for display)
+    const eventsIST = events.map((ev) => ({
+      ...ev,
+      createdAt: ev.createdAt
+        ? new Date(ev.createdAt).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : null,
+      startTime: ev.startTime
+        ? new Date(ev.startTime).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : null,
+      endTime: ev.endTime
+        ? new Date(ev.endTime).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : null,
+      // Optionally, you can leave the 'date' field as well if needed.
+    }));
+
+    return res.status(200).json({ events: eventsIST });
+  } catch (err) {
+    console.error("Error fetching today's calendar events:", err);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
