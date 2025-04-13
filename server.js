@@ -420,65 +420,69 @@ app.post("/api/meeting", async (req, res) => {
 // Add this GET endpoint to fetch the logged-in user's team details
 app.get("/api/teams", async (req, res) => {
   try {
-    // Get the token from the authorization header.
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const token = authHeader.split(" ")[1];
+
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
-    } catch (error) {
+    } catch (err) {
       return res.status(401).json({ message: "Token expired or invalid" });
     }
-    const email = decoded.email;
 
-    // Check for the myTeam=1 query parameter
+    const userEmailFromToken = decoded.email;
+    // Check if ?myTeam=1
     if (req.query.myTeam === "1") {
-      // Use the portal connection to access the 'test' database and the teams collection.
+      // 1) Connect to portal DB -> test -> teams collection
       const testDb = portalConnection.useDb("test");
       const teamsCollection = testDb.collection("teams");
 
-      // Find a team where the user is either the leader or a member.
+      // 2) Find the team where this user is leader or member
       const team = await teamsCollection.findOne({
-        $or: [{ leaderEmail: email }, { "members.email": email }],
+        $or: [
+          { leaderEmail: userEmailFromToken },
+          { "members.email": userEmailFromToken },
+        ],
       });
+
       if (!team) {
+        // Not in any team
         return res.status(200).json({ inTeam: false });
       }
 
-      // Now, retrieve user details from the main MongoDB users collection.
-      // (Assumes that the main connection (mongoose.connect) has created a default DB.)
-      const usersCollection = mongoose.connection.db.collection("users");
+      // 3) Compare with the main DB's users collection (already connected by Mongoose)
+      const usersCollectionMain = mongoose.connection.db.collection("users");
 
-      // Get the leader's name
-      const leaderDoc = await usersCollection.findOne({
+      // Leader name: if found => doc.name; else => "User."
+      const leaderDoc = await usersCollectionMain.findOne({
         email: team.leaderEmail,
       });
-      const leaderName =
-        leaderDoc && leaderDoc.name ? leaderDoc.name : team.leaderEmail;
+      const leaderName = leaderDoc && leaderDoc.name ? leaderDoc.name : "User.";
 
-      // For each member, look up their name.
+      // 4) Build members array with name from main DB if found
       const membersWithNames =
         team.members && team.members.length > 0
           ? await Promise.all(
-              team.members.map(async (member) => {
-                const memberDoc = await usersCollection.findOne({
-                  email: member.email,
+              team.members.map(async (m) => {
+                const userDoc = await usersCollectionMain.findOne({
+                  email: m.email,
                 });
+                const memberName =
+                  userDoc && userDoc.name ? userDoc.name : "User.";
                 return {
-                  email: member.email,
-                  name:
-                    memberDoc && memberDoc.name ? memberDoc.name : member.email,
-                  invitedAt: member.invitedAt,
-                  canAddMembers: member.canAddMembers,
+                  email: m.email,
+                  name: memberName,
+                  invitedAt: m.invitedAt,
+                  canAddMembers: m.canAddMembers || false,
                 };
               })
             )
           : [];
 
-      // Build the response team object with all required details.
+      // 5) Build a response object
       const responseTeam = {
         teamName: team.teamName,
         teamDescription: team.teamDescription,
@@ -486,17 +490,20 @@ app.get("/api/teams", async (req, res) => {
         leaderName: leaderName,
         members: membersWithNames,
         createdAt: team.createdAt,
-        notice: team.notice,
+        notice: team.notice || null,
         joinRequests: team.joinRequests || [],
       };
 
-      // Determine if the logged in user is the team leader.
-      const isLeader = team.leaderEmail.toLowerCase() === email.toLowerCase();
+      const isLeader =
+        team.leaderEmail.toLowerCase() === userEmailFromToken.toLowerCase();
 
-      return res
-        .status(200)
-        .json({ inTeam: true, isLeader: isLeader, team: responseTeam });
+      return res.status(200).json({
+        inTeam: true,
+        isLeader,
+        team: responseTeam,
+      });
     } else {
+      // If query param is missing or invalid
       return res.status(400).json({ message: "Invalid query parameter" });
     }
   } catch (err) {
