@@ -11,7 +11,7 @@ const nodemailer = require("nodemailer");
 const User = require("./models/User");
 const Otp = require("./models/Otp");
 const Feedback = require("./models/Feedback");
-import Groq from "groq-sdk";
+const Groq = require("groq-sdk");
 
 const app = express();
 
