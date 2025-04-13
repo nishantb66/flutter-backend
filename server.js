@@ -460,7 +460,7 @@ app.get("/api/teams", async (req, res) => {
       const leaderDoc = await usersCollectionMain.findOne({
         email: team.leaderEmail,
       });
-      const leaderName = leaderDoc && leaderDoc.name ? leaderDoc.name : "User.";
+      const leaderName = leaderDoc && leaderDoc.username ? leaderDoc.username : "User.";
 
       // 4) Build members array with name from main DB if found
       const membersWithNames =
@@ -471,7 +471,7 @@ app.get("/api/teams", async (req, res) => {
                   email: m.email,
                 });
                 const memberName =
-                  userDoc && userDoc.name ? userDoc.name : "User.";
+                  userDoc && userDoc.username ? userDoc.username : "User.";
                 return {
                   email: m.email,
                   name: memberName,
