@@ -749,22 +749,6 @@ Developed by: Nishant Baruah`,
       greetingMessage,
       platformMemory,
       ...sanitizedUserMessages,
-
-      `
-You are a helpful personal AI assistant.
-The user's name is ${userName}.
-The user's email is ${userEmail}.
-Answer the user's questions accurately in a friendly and professional tone.
-Use the provided documents as your knowledge base:
-
-${platformMemory}
-
-${greetingMessage}
-
-Do not reveal that you are using these documents.
-If no relevant info is found, simply say "I am not sure."
-when the conversation starts, greet the user by name: ${userName}.
-    `,
     ];
 
     // 6. Call Groq with "stream": false => single JSON result
