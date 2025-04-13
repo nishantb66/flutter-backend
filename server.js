@@ -304,6 +304,119 @@ app.post("/api/feedback", async (req, res) => {
   }
 });
 
+// ------------------------------
+// Meeting Rooms Booking Endpoints
+// ------------------------------
+
+// GET /api/meeting
+// Retrieve all meeting room bookings from the "meetingRooms" collection in the "test" database.
+app.get("/api/meeting", async (req, res) => {
+  try {
+    const testDb = portalConnection.useDb("test");
+    const meetingRooms = testDb.collection("meetingRooms");
+
+    // Ensure TTL index is created for automatic document removal after meeting end time.
+    await meetingRooms.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
+
+    const rooms = await meetingRooms.find({}).toArray();
+    return res.status(200).json(rooms);
+  } catch (error) {
+    console.error("GET /api/meeting error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/meeting
+// Books a meeting room. It verifies the user's token, checks data integrity, and then upserts the booking
+app.post("/api/meeting", async (req, res) => {
+  try {
+    // 1. Verify token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "No token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+
+    // 2. Parse incoming data
+    const {
+      roomId,
+      meetingStart,
+      meetingEnd,
+      topic,
+      department,
+      numEmployees,
+      hostDesignation,
+    } = req.body;
+    if (
+      !roomId ||
+      !meetingStart ||
+      !meetingEnd ||
+      !topic ||
+      !department ||
+      !numEmployees ||
+      !hostDesignation
+    ) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const startDate = new Date(meetingStart);
+    const endDate = new Date(meetingEnd);
+
+    if (endDate <= startDate) {
+      return res
+        .status(400)
+        .json({ message: "Meeting End Time must be after Start Time" });
+    }
+
+    // 3. Connect to the test database and obtain the meetingRooms collection
+    const testDb = portalConnection.useDb("test");
+    const meetingRooms = testDb.collection("meetingRooms");
+
+    // Ensure TTL index exists so that documents auto-delete after meetingEnd time.
+    await meetingRooms.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
+
+    // 4. Check if room is already booked
+    const existing = await meetingRooms.findOne({ roomId });
+    if (existing && existing.booked) {
+      return res.status(400).json({ message: "Room is already booked" });
+    }
+
+    // 5. Upsert the booking with UTC times and include a TTL field (expireAt)
+    await meetingRooms.updateOne(
+      { roomId },
+      {
+        $set: {
+          roomId: roomId,
+          booked: true,
+          bookingDetails: {
+            hostName: decoded.username, // Assumes your token payload carries a 'username'
+            hostEmail: decoded.email,
+            hostDesignation: hostDesignation,
+            topic: topic,
+            department: department,
+            meetingStart: startDate.toISOString(),
+            meetingEnd: endDate.toISOString(),
+            numEmployees: numEmployees,
+          },
+          expireAt: endDate, // MongoDB TTL index will remove the document after this time
+        },
+      },
+      { upsert: true }
+    );
+
+    return res.status(200).json({ message: "Room booked successfully" });
+  } catch (error) {
+    console.error("POST /api/meeting error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
