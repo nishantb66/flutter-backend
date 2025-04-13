@@ -456,13 +456,14 @@ app.get("/api/teams", async (req, res) => {
       // 3) Compare with the main DB's users collection (already connected by Mongoose)
       const usersCollectionMain = mongoose.connection.db.collection("users");
 
-      // Leader name: if found => doc.name; else => "User."
+      // Leader name: if found => doc.username; else => "User."
       const leaderDoc = await usersCollectionMain.findOne({
         email: team.leaderEmail,
       });
-      const leaderName = leaderDoc && leaderDoc.username ? leaderDoc.username : "User.";
+      const leaderName =
+        leaderDoc && leaderDoc.username ? leaderDoc.username : "User.";
 
-      // 4) Build members array with name from main DB if found
+      // 4) Build members array with name from main DB if found and convert invitedAt to IST
       const membersWithNames =
         team.members && team.members.length > 0
           ? await Promise.all(
@@ -475,23 +476,53 @@ app.get("/api/teams", async (req, res) => {
                 return {
                   email: m.email,
                   name: memberName,
-                  invitedAt: m.invitedAt,
+                  invitedAt: m.invitedAt
+                    ? new Date(m.invitedAt).toLocaleString("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                      })
+                    : null,
                   canAddMembers: m.canAddMembers || false,
                 };
               })
             )
           : [];
 
-      // 5) Build a response object
+      // 5) Transform joinRequests array: update requestedAt to IST.
+      const joinRequests = (team.joinRequests || []).map((r) => ({
+        ...r,
+        requestedAt: r.requestedAt
+          ? new Date(r.requestedAt).toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+            })
+          : null,
+      }));
+
+      // 6) Transform notice field (if exists) to display updatedAt in IST.
+      const notice = team.notice
+        ? {
+            ...team.notice,
+            updatedAt: team.notice.updatedAt
+              ? new Date(team.notice.updatedAt).toLocaleString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                })
+              : null,
+          }
+        : null;
+
+      // 7) Build the response object with all required details.
       const responseTeam = {
         teamName: team.teamName,
         teamDescription: team.teamDescription,
         leaderEmail: team.leaderEmail,
         leaderName: leaderName,
         members: membersWithNames,
-        createdAt: team.createdAt,
-        notice: team.notice || null,
-        joinRequests: team.joinRequests || [],
+        createdAt: team.createdAt
+          ? new Date(team.createdAt).toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+            })
+          : null,
+        notice: notice,
+        joinRequests: joinRequests,
       };
 
       const isLeader =
