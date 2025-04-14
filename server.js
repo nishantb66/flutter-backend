@@ -64,7 +64,57 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// ------------------------------
+// Announcements Endpoints
+// ------------------------------
+
+// In-memory array of announcements. In production, you might store these in a database.
+const announcements = [
+  {
+    id: 1,
+    title: "New Feature Release",
+    description:
+      "Discover the latest updates and features in our Enterprise Portal. Tap to learn more.",
+    fullText:
+      "Detailed information about the new feature release. This update includes several exciting new functionalities and improvements aimed to enhance your productivity.",
+  },
+  {
+    id: 2,
+    title: "Maintenance Schedule",
+    description:
+      "System maintenance is scheduled for this weekend. Tap here for details.",
+    fullText:
+      "Please note that system maintenance is scheduled for this weekend. The maintenance window is planned to take place on Saturday from 2 PM to 6 PM. Kindly plan your work accordingly.",
+  },
+  {
+    id: 3,
+    title: "Employee Spotlight",
+    description:
+      "Celebrating our top performers this month. Tap to read the story.",
+    fullText:
+      "This month, we are celebrating our top performers who have consistently gone above and beyond. Read on to discover their achievements and inspiring stories.",
+  },
+];
+
+// Endpoint: Get all announcements (for carousel)
+app.get("/api/announcements", (req, res) => {
+  return res.status(200).json({ announcements });
+});
+
+// Endpoint: Get a specific announcement detail by ID
+app.get("/api/announcement/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const announcement = announcements.find((a) => a.id === id);
+  if (announcement) {
+    return res.status(200).json(announcement);
+  } else {
+    return res.status(404).json({ message: "Announcement not found" });
+  }
+});
+
+// ------------------------------
 // Registration endpoint
+// ------------------------------
 app.post("/api/register", async (req, res) => {
   const { username, email, password } = req.body;
   try {
@@ -82,7 +132,9 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
+// ------------------------------
 // Login endpoint
+// ------------------------------
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -107,7 +159,9 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+// ------------------------------
 // Forgot password endpoint: send OTP email.
+// ------------------------------
 app.post("/api/forgot-password", async (req, res) => {
   const { email } = req.body;
   try {
@@ -138,7 +192,9 @@ app.post("/api/forgot-password", async (req, res) => {
   }
 });
 
+// ------------------------------
 // Reset password endpoint: verify OTP and update password.
+// ------------------------------
 app.post("/api/reset-password", async (req, res) => {
   const { email, otp, newPassword } = req.body;
   try {
@@ -157,8 +213,9 @@ app.post("/api/reset-password", async (req, res) => {
   }
 });
 
-// My Leaves endpoint: returns leave records for the logged-in user.
-// Uses the portalConnection and explicitly selects the 'test' database.
+// ------------------------------
+// My Leaves endpoint
+// ------------------------------
 app.get("/api/my-leaves", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -185,8 +242,9 @@ app.get("/api/my-leaves", async (req, res) => {
   }
 });
 
-// My Reimbursements endpoint: returns reimbursement records for the logged-in user.
-// Uses the portalConnection (with the 'test' database) and queries the "reimbursements" collection.
+// ------------------------------
+// My Reimbursements endpoint
+// ------------------------------
 app.get("/api/my-reimbursements", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -213,8 +271,9 @@ app.get("/api/my-reimbursements", async (req, res) => {
   }
 });
 
-// New: My Tasks endpoint: returns task documents (from "assignment" collection)
-// for the logged-in user, using the portalConnection and the "test" database.
+// ------------------------------
+// My Tasks endpoint
+// ------------------------------
 app.get("/api/my-tasks", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -228,7 +287,6 @@ app.get("/api/my-tasks", async (req, res) => {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
     const testDb = portalConnection.useDb("test");
-    // Here, we follow the pattern to return both tasks created by the user and tasks assigned to them.
     const createdTasks = await testDb
       .collection("assignment")
       .find({ "createdBy.email": userEmail })
@@ -246,9 +304,10 @@ app.get("/api/my-tasks", async (req, res) => {
   }
 });
 
-// New: Feedback endpoint
+// ------------------------------
+// Feedback endpoint
+// ------------------------------
 app.post("/api/feedback", async (req, res) => {
-  // Verify token from headers
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Unauthorized" });
@@ -264,8 +323,6 @@ app.post("/api/feedback", async (req, res) => {
   if (!userEmail) {
     return res.status(400).json({ message: "Invalid token: email missing" });
   }
-
-  // Destructure feedback fields from request body
   const {
     enterpriseManagementSaaS,
     userExperience,
@@ -273,8 +330,6 @@ app.post("/api/feedback", async (req, res) => {
     improvements,
     enterprisePortalRating,
   } = req.body;
-
-  // Basic validation of required fields (more advanced validation can be added)
   if (
     !enterpriseManagementSaaS ||
     !userExperience ||
@@ -286,9 +341,7 @@ app.post("/api/feedback", async (req, res) => {
       .status(400)
       .json({ message: "Please provide all required feedback fields" });
   }
-
   try {
-    // Create and save the feedback document
     const feedback = new Feedback({
       userEmail,
       enterpriseManagementSaaS,
@@ -308,17 +361,11 @@ app.post("/api/feedback", async (req, res) => {
 // ------------------------------
 // Meeting Rooms Booking Endpoints
 // ------------------------------
-
-// GET /api/meeting
-// Retrieve all meeting room bookings from the "meetingRooms" collection in the "test" database.
 app.get("/api/meeting", async (req, res) => {
   try {
     const testDb = portalConnection.useDb("test");
     const meetingRooms = testDb.collection("meetingRooms");
-
-    // Ensure TTL index is created for automatic document removal after meeting end time.
     await meetingRooms.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
-
     const rooms = await meetingRooms.find({}).toArray();
     return res.status(200).json(rooms);
   } catch (error) {
@@ -327,11 +374,8 @@ app.get("/api/meeting", async (req, res) => {
   }
 });
 
-// POST /api/meeting
-// Books a meeting room. It verifies the user's token, checks data integrity, and then upserts the booking
 app.post("/api/meeting", async (req, res) => {
   try {
-    // 1. Verify token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No token provided" });
@@ -343,8 +387,6 @@ app.post("/api/meeting", async (req, res) => {
     } catch (err) {
       return res.status(401).json({ message: "Invalid token" });
     }
-
-    // 2. Parse incoming data
     const {
       roomId,
       meetingStart,
@@ -365,30 +407,20 @@ app.post("/api/meeting", async (req, res) => {
     ) {
       return res.status(400).json({ message: "Missing required fields" });
     }
-
     const startDate = new Date(meetingStart);
     const endDate = new Date(meetingEnd);
-
     if (endDate <= startDate) {
       return res
         .status(400)
         .json({ message: "Meeting End Time must be after Start Time" });
     }
-
-    // 3. Connect to the test database and obtain the meetingRooms collection
     const testDb = portalConnection.useDb("test");
     const meetingRooms = testDb.collection("meetingRooms");
-
-    // Ensure TTL index exists so that documents auto-delete after meetingEnd time.
     await meetingRooms.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
-
-    // 4. Check if room is already booked
     const existing = await meetingRooms.findOne({ roomId });
     if (existing && existing.booked) {
       return res.status(400).json({ message: "Room is already booked" });
     }
-
-    // 5. Upsert the booking with UTC times and include a TTL field (expireAt)
     await meetingRooms.updateOne(
       { roomId },
       {
@@ -396,7 +428,7 @@ app.post("/api/meeting", async (req, res) => {
           roomId: roomId,
           booked: true,
           bookingDetails: {
-            hostName: decoded.username, // Assumes your token payload carries a 'username'
+            hostName: decoded.username,
             hostEmail: decoded.email,
             hostDesignation: hostDesignation,
             topic: topic,
@@ -405,12 +437,11 @@ app.post("/api/meeting", async (req, res) => {
             meetingEnd: endDate.toISOString(),
             numEmployees: numEmployees,
           },
-          expireAt: endDate, // MongoDB TTL index will remove the document after this time
+          expireAt: endDate,
         },
       },
       { upsert: true }
     );
-
     return res.status(200).json({ message: "Room booked successfully" });
   } catch (error) {
     console.error("POST /api/meeting error:", error);
@@ -418,7 +449,9 @@ app.post("/api/meeting", async (req, res) => {
   }
 });
 
-// Add this GET endpoint to fetch the logged-in user's team details
+// ------------------------------
+// Team Details Endpoint
+// ------------------------------
 app.get("/api/teams", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -426,45 +459,31 @@ app.get("/api/teams", async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const token = authHeader.split(" ")[1];
-
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ message: "Token expired or invalid" });
     }
-
     const userEmailFromToken = decoded.email;
-    // Check if ?myTeam=1
     if (req.query.myTeam === "1") {
-      // 1) Connect to portal DB -> test -> teams collection
       const testDb = portalConnection.useDb("test");
       const teamsCollection = testDb.collection("teams");
-
-      // 2) Find the team where this user is leader or member
       const team = await teamsCollection.findOne({
         $or: [
           { leaderEmail: userEmailFromToken },
           { "members.email": userEmailFromToken },
         ],
       });
-
       if (!team) {
-        // Not in any team
         return res.status(200).json({ inTeam: false });
       }
-
-      // 3) Compare with the main DB's users collection (already connected by Mongoose)
       const usersCollectionMain = mongoose.connection.db.collection("users");
-
-      // Leader name: if found => doc.username; else => "User."
       const leaderDoc = await usersCollectionMain.findOne({
         email: team.leaderEmail,
       });
       const leaderName =
         leaderDoc && leaderDoc.username ? leaderDoc.username : "User.";
-
-      // 4) Build members array with name from main DB if found and convert invitedAt to IST
       const membersWithNames =
         team.members && team.members.length > 0
           ? await Promise.all(
@@ -487,8 +506,6 @@ app.get("/api/teams", async (req, res) => {
               })
             )
           : [];
-
-      // 5) Transform joinRequests array: update requestedAt to IST.
       const joinRequests = (team.joinRequests || []).map((r) => ({
         ...r,
         requestedAt: r.requestedAt
@@ -497,8 +514,6 @@ app.get("/api/teams", async (req, res) => {
             })
           : null,
       }));
-
-      // 6) Transform notice field (if exists) to display updatedAt in IST.
       const notice = team.notice
         ? {
             ...team.notice,
@@ -509,8 +524,6 @@ app.get("/api/teams", async (req, res) => {
               : null,
           }
         : null;
-
-      // 7) Build the response object with all required details.
       const responseTeam = {
         teamName: team.teamName,
         teamDescription: team.teamDescription,
@@ -525,17 +538,12 @@ app.get("/api/teams", async (req, res) => {
         notice: notice,
         joinRequests: joinRequests,
       };
-
       const isLeader =
         team.leaderEmail.toLowerCase() === userEmailFromToken.toLowerCase();
-
-      return res.status(200).json({
-        inTeam: true,
-        isLeader,
-        team: responseTeam,
-      });
+      return res
+        .status(200)
+        .json({ inTeam: true, isLeader, team: responseTeam });
     } else {
-      // If query param is missing or invalid
       return res.status(400).json({ message: "Invalid query parameter" });
     }
   } catch (err) {
@@ -544,15 +552,14 @@ app.get("/api/teams", async (req, res) => {
   }
 });
 
-// New endpoint to fetch today's calendar events for the logged-in user
+// ------------------------------
+// Calendar Events Endpoint for Today
+// ------------------------------
 app.get("/api/calendar/today", async (req, res) => {
   try {
-    // 1) Use portalConnection => test => calendarEvents collection
     const calendarEvents = portalConnection
       .useDb("test")
       .collection("calendarEvents");
-
-    // 2) Verify token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "No auth token" });
@@ -565,38 +572,22 @@ app.get("/api/calendar/today", async (req, res) => {
       return res.status(401).json({ message: "Invalid token" });
     }
     const userEmail = decoded.email;
-
-    // 3) Get the current date in IST (Asia/Kolkata)
     const now = new Date();
-    // Convert to a Date object in IST:
     const nowIST = new Date(
       now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
     );
     const year = nowIST.getFullYear();
     const month = nowIST.getMonth();
     const day = nowIST.getDate();
-
-    // Define the start and end of *today* in IST
     const startOfDayIST = new Date(year, month, day, 0, 0, 0, 0);
     const endOfDayIST = new Date(year, month, day, 23, 59, 59, 999);
-
-    // Convert these IST boundaries to their UTC equivalents for querying
-    // Since IST = UTC+5:30, subtract 5.5 hours worth of milliseconds
     const offsetMillis = 5.5 * 60 * 60 * 1000;
     const startUTC = new Date(startOfDayIST.getTime() - offsetMillis);
     const endUTC = new Date(endOfDayIST.getTime() - offsetMillis);
-
-    // 4) Find all events for this user that fall within today's date boundaries (UTC)
-    //    We assume the "date" field in MongoDB is stored as a proper Date object.
     const events = await calendarEvents
-      .find({
-        email: userEmail,
-        date: { $gte: startUTC, $lte: endUTC },
-      })
-      .sort({ date: 1 }) // sort ascending by date
+      .find({ email: userEmail, date: { $gte: startUTC, $lte: endUTC } })
+      .sort({ date: 1 })
       .toArray();
-
-    // 5) Convert relevant fields back to IST for display
     const eventsIST = events.map((ev) => ({
       ...ev,
       createdAt: ev.createdAt
@@ -614,11 +605,7 @@ app.get("/api/calendar/today", async (req, res) => {
             timeZone: "Asia/Kolkata",
           })
         : null,
-      // The "date" field will remain as a Date in UTC by default
-      // but you can also convert it if you'd like:
-      // date: new Date(ev.date).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
     }));
-
     return res.status(200).json({ events: eventsIST });
   } catch (err) {
     console.error("Error fetching today's calendar events:", err);
@@ -626,12 +613,11 @@ app.get("/api/calendar/today", async (req, res) => {
   }
 });
 
-// GET /api/articles/latest
-// Fetch the latest 5 articles from the portal mongo URI ("test" database)
-// Requires a valid JWT token.
+// ------------------------------
+// Latest Articles Endpoint
+// ------------------------------
 app.get("/api/articles/latest", async (req, res) => {
   try {
-    // Verify token presence and validity
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Please log in to view" });
@@ -642,18 +628,13 @@ app.get("/api/articles/latest", async (req, res) => {
     } catch (err) {
       return res.status(401).json({ message: "Please log in to view" });
     }
-
-    // Use the "test" database on portalConnection to fetch articles
     const testDb = portalConnection.useDb("test");
     const articlesCollection = testDb.collection("articles");
-
-    // Query the latest 5 articles sorted descending by createdAt
     const articles = await articlesCollection
       .find({})
       .sort({ createdAt: -1 })
       .limit(5)
       .toArray();
-
     return res.status(200).json({ articles });
   } catch (error) {
     console.error("Error fetching latest articles:", error);
@@ -661,11 +642,10 @@ app.get("/api/articles/latest", async (req, res) => {
   }
 });
 
-// =========== AI Chat Feature ===========
-// Create the Groq instance with your API key
+// ------------------------------
+// AI Chat Endpoint
+// ------------------------------
 const groq = new Groq({ apiKey: process.env.GROQ });
-
-// Helper: forcibly map invalid roles to one of "system", "assistant", or "user".
 function sanitizeRole(role) {
   switch (role) {
     case "system":
@@ -674,10 +654,8 @@ function sanitizeRole(role) {
       return role;
     case "ai":
     case "bot":
-      // If your code used "ai" or "bot" for the assistant, fix it:
       return "assistant";
     default:
-      // If the role is unknown or missing, assume it's a user message:
       return "user";
   }
 }
@@ -773,8 +751,9 @@ Developed by: Nishant Baruah`,
   }
 });
 
-// NEW: My Tasks (Assigned) endpoint
-// Returns tasks where the logged in user's email is found in the 'assignedTo' field of the tasks
+// ------------------------------
+// My Tasks (Assigned) Endpoint
+// ------------------------------
 app.get("/api/tasks", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -792,23 +771,17 @@ app.get("/api/tasks", async (req, res) => {
     if (!userEmail) {
       return res.status(400).json({ message: "Invalid token: email missing" });
     }
-
-    // Connect to the 'test' database using the portalConnection
     const testDb = portalConnection.useDb("test");
-    // Query the 'tasks' collection where assignedTo.email matches the user's email
     const tasks = await testDb
       .collection("tasks")
       .find({ "assignedTo.email": userEmail })
       .toArray();
-
-    // Return only the required fields: taskName, deadline, urgency, and updatedAt.
     const filteredTasks = tasks.map((task) => ({
       taskName: task.taskName,
-      deadline: task.deadline, // stored as a Date in MongoDB
+      deadline: task.deadline,
       urgency: task.urgency,
-      updatedAt: task.updatedAt, // date of assignment; stored as Date
+      updatedAt: task.updatedAt,
     }));
-
     return res.status(200).json({ tasks: filteredTasks });
   } catch (error) {
     console.error("Error fetching tasks:", error);
