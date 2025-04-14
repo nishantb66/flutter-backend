@@ -74,7 +74,7 @@ const announcements = [
     id: 1,
     title: "New Feature Release",
     description:
-      "Discover the latest updates and features in our Enterprise Portal. Tap to learn more.",
+      "Now user can view tasks in team and tasks section",
     fullText:
       "Detailed information about the new feature release. This update includes several exciting new functionalities and improvements aimed to enhance your productivity.",
   },
