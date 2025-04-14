@@ -773,6 +773,49 @@ Developed by: Nishant Baruah`,
   }
 });
 
+// NEW: My Tasks (Assigned) endpoint
+// Returns tasks where the logged in user's email is found in the 'assignedTo' field of the tasks
+app.get("/api/tasks", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+    const userEmail = decoded.email;
+    if (!userEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+
+    // Connect to the 'test' database using the portalConnection
+    const testDb = portalConnection.useDb("test");
+    // Query the 'tasks' collection where assignedTo.email matches the user's email
+    const tasks = await testDb
+      .collection("tasks")
+      .find({ "assignedTo.email": userEmail })
+      .toArray();
+
+    // Return only the required fields: taskName, deadline, urgency, and updatedAt.
+    const filteredTasks = tasks.map((task) => ({
+      taskName: task.taskName,
+      deadline: task.deadline, // stored as a Date in MongoDB
+      urgency: task.urgency,
+      updatedAt: task.updatedAt, // date of assignment; stored as Date
+    }));
+
+    return res.status(200).json({ tasks: filteredTasks });
+  } catch (error) {
+    console.error("Error fetching tasks:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
