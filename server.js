@@ -935,6 +935,10 @@ const io = new Server(server, {
   },
 });
 
+// Ephemeral storage for unread counts:
+// Key format: `${teamId}_${userEmail.toLowerCase()}`
+const unreadCounts = {};
+
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
@@ -949,7 +953,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Verify token & parse email in lowercase
+      // Verify token & parse email
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -959,17 +963,17 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
 
-      // Get the team document from the "teams" collection
+      // Retrieve the team doc from DB
       const testDb = portalConnection.useDb("test");
-      const team = await testDb.collection("teams").findOne({
-        _id: new mongoose.Types.ObjectId(teamId),
-      });
+      const team = await testDb
+        .collection("teams")
+        .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
       if (!team) {
         socket.emit("error", { message: "Team not found." });
         return;
       }
 
-      // Check membership: compare leaderEmail and members.email case-insensitively
+      // Check membership
       const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
       const isLeader = leaderEmail === userEmail;
       const isMember =
@@ -986,15 +990,29 @@ io.on("connection", (socket) => {
       // Join the Socket.IO room named "team_<teamId>"
       const room = "team_" + teamId;
       socket.join(room);
+
+      // Also join a "private" room for this user’s email (for unreadCount updates)
+      socket.join(userEmail);
+
       console.log(`Socket ${socket.id} joined room ${room}`);
       socket.emit("joinedTeam", { teamId });
+
+      // Mark messages as read for this user (unread=0) when they actively join the chat:
+      // (Alternatively, you can do this in a separate event or on "disconnect" from the chat screen.)
+      const key = `${teamId}_${userEmail}`;
+      unreadCounts[key] = 0; // Reset unread
+      // Send them an updated unread count of 0
+      io.to(userEmail).emit("unreadCountUpdate", {
+        teamId,
+        unreadCount: 0,
+      });
     } catch (error) {
       console.error("joinTeam error:", error);
       socket.emit("error", { message: "Error joining team." });
     }
   });
 
-  // NEW: Listen for "typing" events and broadcast to others in the room
+  // "typing" event (already in your code)
   socket.on("typing", (data) => {
     try {
       const { teamId, token, typing } = data;
@@ -1007,7 +1025,7 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
-      // Broadcast the typing status to everyone in the room except the sender.
+      // Broadcast typing to all in the team except the sender
       socket.to("team_" + teamId).emit("typing", {
         senderEmail: userEmail,
         senderName: userName,
@@ -1021,14 +1039,13 @@ io.on("connection", (socket) => {
   // Listen for team chat messages with reply-to support
   socket.on("teamMessage", async (data) => {
     try {
-      // Accept an optional replyTo field.
       const { teamId, token, message, replyTo } = data;
       if (!teamId || !token || !message) {
         socket.emit("error", { message: "Missing required fields." });
         return;
       }
 
-      // Verify token & get normalized email
+      // Verify token & parse email
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -1036,16 +1053,16 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Invalid token." });
         return;
       }
-      const userEmail = (decoded.email || "").trim().toLowerCase();
-      const userName = decoded.username || "User";
+      const senderEmail = (decoded.email || "").trim().toLowerCase();
+      const senderName = decoded.username || "User";
 
-      // Build the message document – include replyTo if provided.
+      // Insert the message in DB
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
         teamId,
-        senderEmail: userEmail,
-        senderName: userName,
+        senderEmail,
+        senderName,
         message,
         timestamp: new Date(),
       };
@@ -1056,6 +1073,37 @@ io.on("connection", (socket) => {
 
       // Broadcast the new message to all sockets in the team room
       io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
+
+      // Increment unread for all other members of the team
+      const teamDoc = await testDb
+        .collection("teams")
+        .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
+      if (teamDoc) {
+        // Gather all user emails in the team
+        let allEmails = [teamDoc.leaderEmail || ""].concat(
+          (teamDoc.members || []).map((m) => m.email)
+        );
+        allEmails = allEmails.map((x) => x.trim().toLowerCase());
+
+        for (const userEmail of allEmails) {
+          if (userEmail !== senderEmail) {
+            const key = `${teamId}_${userEmail}`;
+            // If the user is "inside" the chat screen, we likely set unread=0
+            // But if not inside the chat screen, increment
+            if (unreadCounts[key] == null) {
+              unreadCounts[key] = 0;
+            }
+            // If that user hasn’t joined the chat screen, increment
+            unreadCounts[key] += 1;
+
+            // Emit updated unread count to that user’s "private" room if they're connected
+            io.to(userEmail).emit("unreadCountUpdate", {
+              teamId,
+              unreadCount: unreadCounts[key],
+            });
+          }
+        }
+      }
     } catch (error) {
       console.error("teamMessage error:", error);
       socket.emit("error", { message: "Error sending team message." });
