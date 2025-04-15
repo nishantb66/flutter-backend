@@ -12,6 +12,8 @@ const User = require("./models/User");
 const Otp = require("./models/Otp");
 const Feedback = require("./models/Feedback");
 const Groq = require("groq-sdk");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 
@@ -862,6 +864,107 @@ app.get("/api/profile", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Create HTTP server and attach Socket.IO
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Adjust CORS settings as needed
+  },
+});
+
+// Socket.IO real-time team chat logic
+io.on("connection", (socket) => {
+  console.log("New client connected:", socket.id);
+
+  // Listen for client joining a team room
+  socket.on("joinTeam", async (data) => {
+    try {
+      const { teamId, token } = data;
+      if (!token) {
+        socket.emit("error", { message: "Authentication token missing." });
+        return;
+      }
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+      } catch (err) {
+        socket.emit("error", { message: "Invalid token." });
+        return;
+      }
+      const userEmail = decoded.email;
+      // Use the portalConnection to get the team from "teams" collection
+      const testDb = portalConnection.useDb("test");
+      // Note: Make sure teamId is provided as a valid ObjectId string.
+      const team = await testDb
+        .collection("teams")
+        .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
+      if (!team) {
+        socket.emit("error", { message: "Team not found." });
+        return;
+      }
+      // Check if the user is either the team leader or one of the members
+      const isMember =
+        team.members &&
+        team.members.some((member) => member.email === userEmail);
+      if (team.leaderEmail !== userEmail && !isMember) {
+        socket.emit("error", { message: "Not authorized to join this team." });
+        return;
+      }
+      // Join the Socket.IO room for this team
+      const room = "team_" + teamId;
+      socket.join(room);
+      socket.emit("joinedTeam", { teamId });
+      console.log(`Socket ${socket.id} joined room ${room}`);
+    } catch (error) {
+      console.error("joinTeam error:", error);
+      socket.emit("error", { message: "Error joining team." });
+    }
+  });
+
+  // Listen for team chat messages
+  socket.on("teamMessage", async (data) => {
+    try {
+      const { teamId, token, message } = data;
+      if (!teamId || !token || !message) {
+        socket.emit("error", { message: "Missing required fields." });
+        return;
+      }
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+      } catch (err) {
+        socket.emit("error", { message: "Invalid token." });
+        return;
+      }
+      const userEmail = decoded.email;
+      const userName = decoded.username || "User";
+
+      // Save the message in the 'teamchats' collection (persistently stored)
+      const testDb = portalConnection.useDb("test");
+      const teamChatsCollection = testDb.collection("teamchats");
+      const messageDoc = {
+        teamId: teamId,
+        senderEmail: userEmail,
+        senderName: userName,
+        message: message,
+        timestamp: new Date(),
+      };
+      await teamChatsCollection.insertOne(messageDoc);
+
+      // Broadcast the new message to all clients in the team room
+      io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
+    } catch (error) {
+      console.error("teamMessage error:", error);
+      socket.emit("error", { message: "Error sending team message." });
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
+
+// Start listening with the HTTP server instead of app.listen
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
