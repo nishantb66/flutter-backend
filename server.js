@@ -460,53 +460,74 @@ app.get("/api/teams", async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const token = authHeader.split(" ")[1];
+
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ message: "Token expired or invalid" });
     }
-    const userEmailFromToken = decoded.email;
+
+    const userEmailFromToken = (decoded.email || "").trim().toLowerCase();
+
+    // If we only want to fetch the current user's team
     if (req.query.myTeam === "1") {
       const testDb = portalConnection.useDb("test");
       const teamsCollection = testDb.collection("teams");
+
+      // Case-insensitive query to match leaderEmail or members.email
       const team = await teamsCollection.findOne({
         $or: [
-          { leaderEmail: userEmailFromToken },
-          { "members.email": userEmailFromToken },
+          {
+            leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") },
+          },
+          {
+            "members.email": {
+              $regex: new RegExp(`^${userEmailFromToken}$`, "i"),
+            },
+          },
         ],
       });
+
       if (!team) {
+        // Not in any team
         return res.status(200).json({ inTeam: false });
       }
+
+      // Now, gather leader and member details for the response
       const usersCollectionMain = mongoose.connection.db.collection("users");
+
+      // Leader doc
       const leaderDoc = await usersCollectionMain.findOne({
-        email: team.leaderEmail,
+        email: { $regex: new RegExp(`^${team.leaderEmail}$`, "i") },
       });
       const leaderName =
-        leaderDoc && leaderDoc.username ? leaderDoc.username : "User.";
-      const membersWithNames =
-        team.members && team.members.length > 0
-          ? await Promise.all(
-              team.members.map(async (m) => {
-                const userDoc = await usersCollectionMain.findOne({
-                  email: m.email,
-                });
-                const memberName =
-                  userDoc && userDoc.username ? userDoc.username : "User.";
-                return {
-                  email: m.email,
-                  name: memberName,
-                  invitedAt: m.invitedAt
-                    ? new Date(m.invitedAt).toLocaleString("en-IN", {
-                        timeZone: "Asia/Kolkata",
-                      })
-                    : null,
-                  canAddMembers: m.canAddMembers || false,
-                };
-              })
-            )
-          : [];
+        leaderDoc && leaderDoc.username ? leaderDoc.username : "User";
+
+      // Map each member to add 'name' from main users collection
+      const membersWithNames = Array.isArray(team.members)
+        ? await Promise.all(
+            team.members.map(async (m) => {
+              const userDoc = await usersCollectionMain.findOne({
+                email: { $regex: new RegExp(`^${m.email}$`, "i") },
+              });
+              const memberName =
+                userDoc && userDoc.username ? userDoc.username : "User";
+              return {
+                email: m.email,
+                name: memberName,
+                invitedAt: m.invitedAt
+                  ? new Date(m.invitedAt).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                    })
+                  : null,
+                canAddMembers: m.canAddMembers || false,
+              };
+            })
+          )
+        : [];
+
+      // Process joinRequests if present
       const joinRequests = (team.joinRequests || []).map((r) => ({
         ...r,
         requestedAt: r.requestedAt
@@ -515,6 +536,8 @@ app.get("/api/teams", async (req, res) => {
             })
           : null,
       }));
+
+      // Process notice if present
       const notice = team.notice
         ? {
             ...team.notice,
@@ -525,7 +548,10 @@ app.get("/api/teams", async (req, res) => {
               : null,
           }
         : null;
+
+      // Return the _id (as a string) so the frontend can store teamId
       const responseTeam = {
+        _id: team._id.toString(), // <--- IMPORTANT
         teamName: team.teamName,
         teamDescription: team.teamDescription,
         leaderEmail: team.leaderEmail,
@@ -539,12 +565,19 @@ app.get("/api/teams", async (req, res) => {
         notice: notice,
         joinRequests: joinRequests,
       };
+
+      // Determine if this user is the leader (case-insensitive compare)
       const isLeader =
-        team.leaderEmail.toLowerCase() === userEmailFromToken.toLowerCase();
-      return res
-        .status(200)
-        .json({ inTeam: true, isLeader, team: responseTeam });
+        team.leaderEmail.trim().toLowerCase() === userEmailFromToken;
+
+      // Return the final response
+      return res.status(200).json({
+        inTeam: true,
+        isLeader,
+        team: responseTeam,
+      });
     } else {
+      // If the endpoint is called without ?myTeam=1, respond with an error or handle differently
       return res.status(400).json({ message: "Invalid query parameter" });
     }
   } catch (err) {
@@ -868,24 +901,24 @@ app.get("/api/profile", async (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust CORS settings as needed
+    origin: "*", // Adjust if needed
   },
 });
 
-// Socket.IO real-time team chat logic
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  // Listen for client joining a team room
   socket.on("joinTeam", async (data) => {
     try {
       const { teamId, token } = data;
       if (!teamId || !token) {
-        socket.emit("error", { message: "Missing teamId or authentication token." });
+        socket.emit("error", {
+          message: "Missing teamId or authentication token.",
+        });
         return;
       }
 
-      // Verify the token and extract the email; compare in a case-insensitive way.
+      // Verify token & parse email in lowercase
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -895,34 +928,31 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
 
-      // Use the portalConnection to get the team from the "teams" collection
+      // Query the DB for the team
       const testDb = portalConnection.useDb("test");
-      // Make sure teamId is a valid ObjectId string.
-      const team = await testDb
-        .collection("teams")
-        .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
-
+      const team = await testDb.collection("teams").findOne({
+        _id: new mongoose.Types.ObjectId(teamId),
+      });
       if (!team) {
         socket.emit("error", { message: "Team not found." });
         return;
       }
 
-      // Compare emails in a case-insensitive way
+      // Check membership
       const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
-      const isLeader = (leaderEmail === userEmail);
+      const isLeader = leaderEmail === userEmail;
       const isMember =
-        team.members &&
         Array.isArray(team.members) &&
-        team.members.some((member) => {
-          return (member.email || "").trim().toLowerCase() === userEmail;
-        });
+        team.members.some(
+          (m) => (m.email || "").trim().toLowerCase() === userEmail
+        );
 
       if (!isLeader && !isMember) {
         socket.emit("error", { message: "Not authorized to join this team." });
         return;
       }
 
-      // Join the Socket.IO room for this team
+      // Join the room
       const room = "team_" + teamId;
       socket.join(room);
       console.log(`Socket ${socket.id} joined room ${room}`);
@@ -933,7 +963,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for team chat messages
   socket.on("teamMessage", async (data) => {
     try {
       const { teamId, token, message } = data;
@@ -942,7 +971,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Verify the token and extract the email (case-insensitive)
+      // Verify token & parse email
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -953,19 +982,19 @@ io.on("connection", (socket) => {
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Save the message in the 'teamchats' collection (persistent storage)
+      // Save the message to 'teamchats'
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
-        teamId: teamId,
+        teamId,
         senderEmail: userEmail,
         senderName: userName,
-        message: message,
+        message,
         timestamp: new Date(),
       };
       await teamChatsCollection.insertOne(messageDoc);
 
-      // Broadcast the new message to all clients in the team room
+      // Broadcast to all in the room
       io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
     } catch (error) {
       console.error("teamMessage error:", error);
@@ -978,8 +1007,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start listening with the HTTP server instead of app.listen
+// Finally, start the server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
