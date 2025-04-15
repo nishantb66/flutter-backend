@@ -81,7 +81,7 @@ const announcements = [
     id: 2,
     title: "Maintenance and update Schedule",
     description:
-      "App maintenance and update is scheduled for everyday for 1 to 2 hrs. More details on shared later",
+      "App maintenance and update is scheduled for everyday for 1 to 2 hrs.",
     fullText:
       "Please note that system maintenance is scheduled for this weekend. The maintenance window is planned to take place on Saturday from 2 PM to 6 PM. Kindly plan your work accordingly.",
   },
