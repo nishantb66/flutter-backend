@@ -880,10 +880,12 @@ io.on("connection", (socket) => {
   socket.on("joinTeam", async (data) => {
     try {
       const { teamId, token } = data;
-      if (!token) {
-        socket.emit("error", { message: "Authentication token missing." });
+      if (!teamId || !token) {
+        socket.emit("error", { message: "Missing teamId or authentication token." });
         return;
       }
+
+      // Verify the token and extract the email; compare in a case-insensitive way.
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -891,30 +893,40 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Invalid token." });
         return;
       }
-      const userEmail = decoded.email;
-      // Use the portalConnection to get the team from "teams" collection
+      const userEmail = (decoded.email || "").trim().toLowerCase();
+
+      // Use the portalConnection to get the team from the "teams" collection
       const testDb = portalConnection.useDb("test");
-      // Note: Make sure teamId is provided as a valid ObjectId string.
+      // Make sure teamId is a valid ObjectId string.
       const team = await testDb
         .collection("teams")
         .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
+
       if (!team) {
         socket.emit("error", { message: "Team not found." });
         return;
       }
-      // Check if the user is either the team leader or one of the members
+
+      // Compare emails in a case-insensitive way
+      const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
+      const isLeader = (leaderEmail === userEmail);
       const isMember =
         team.members &&
-        team.members.some((member) => member.email === userEmail);
-      if (team.leaderEmail !== userEmail && !isMember) {
+        Array.isArray(team.members) &&
+        team.members.some((member) => {
+          return (member.email || "").trim().toLowerCase() === userEmail;
+        });
+
+      if (!isLeader && !isMember) {
         socket.emit("error", { message: "Not authorized to join this team." });
         return;
       }
+
       // Join the Socket.IO room for this team
       const room = "team_" + teamId;
       socket.join(room);
-      socket.emit("joinedTeam", { teamId });
       console.log(`Socket ${socket.id} joined room ${room}`);
+      socket.emit("joinedTeam", { teamId });
     } catch (error) {
       console.error("joinTeam error:", error);
       socket.emit("error", { message: "Error joining team." });
@@ -929,6 +941,8 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Missing required fields." });
         return;
       }
+
+      // Verify the token and extract the email (case-insensitive)
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -936,10 +950,10 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Invalid token." });
         return;
       }
-      const userEmail = decoded.email;
+      const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Save the message in the 'teamchats' collection (persistently stored)
+      // Save the message in the 'teamchats' collection (persistent storage)
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
@@ -968,3 +982,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
