@@ -826,6 +826,42 @@ app.get("/api/platformupdates", (req, res) => {
   return res.status(200).json({ updates: platformUpdates });
 });
 
+// ------------------------------
+// Profile Endpoint
+// ------------------------------
+app.get("/api/profile", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+    const userEmail = decoded.email;
+    if (!userEmail) {
+      return res.status(400).json({ message: "Email not found in token" });
+    }
+    // Use the portalConnection (from portal_mongo_uri) for the "test" database.
+    const testDb = portalConnection.useDb("test");
+    // Find a user document where the embedded profile.email matches the token's email.
+    const userDoc = await testDb
+      .collection("users")
+      .findOne({ "profile.email": userEmail });
+    if (!userDoc) {
+      return res.status(404).json({ message: "User profile not found" });
+    }
+    return res.status(200).json({ profile: userDoc.profile });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
