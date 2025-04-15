@@ -897,6 +897,36 @@ app.get("/api/profile", async (req, res) => {
   }
 });
 
+// ------------------------------
+// Team Chats History Endpoint
+// ------------------------------
+app.get("/api/teamchats/:teamId", async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    try {
+      jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token." });
+    }
+    const testDb = portalConnection.useDb("test");
+    const teamChatsCollection = testDb.collection("teamchats");
+    // Retrieve messages for this team sorted by timestamp (oldest first)
+    const messages = await teamChatsCollection
+      .find({ teamId })
+      .sort({ timestamp: 1 })
+      .toArray();
+    return res.status(200).json({ messages });
+  } catch (error) {
+    console.error("Error loading team chats:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Create HTTP server and attach Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -928,7 +958,7 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
 
-      // Query the DB for the team
+      // Get the team document from the "teams" collection
       const testDb = portalConnection.useDb("test");
       const team = await testDb.collection("teams").findOne({
         _id: new mongoose.Types.ObjectId(teamId),
@@ -938,7 +968,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Check membership
+      // Check membership: compare leaderEmail and members.email in a case-insensitive way
       const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
       const isLeader = leaderEmail === userEmail;
       const isMember =
@@ -952,7 +982,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Join the room
+      // Join the Socket.IO room named "team_<teamId>"
       const room = "team_" + teamId;
       socket.join(room);
       console.log(`Socket ${socket.id} joined room ${room}`);
@@ -971,7 +1001,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Verify token & parse email
+      // Verify token & get normalized email
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -982,7 +1012,7 @@ io.on("connection", (socket) => {
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Save the message to 'teamchats'
+      // Save the message in the 'teamchats' collection (persistent storage)
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
@@ -994,7 +1024,7 @@ io.on("connection", (socket) => {
       };
       await teamChatsCollection.insertOne(messageDoc);
 
-      // Broadcast to all in the room
+      // Broadcast the new message to all sockets in the room
       io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
     } catch (error) {
       console.error("teamMessage error:", error);
@@ -1007,7 +1037,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Finally, start the server
+// Finally, start the server using the HTTP server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
