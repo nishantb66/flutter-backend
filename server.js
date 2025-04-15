@@ -942,6 +942,15 @@ const unreadCounts = {};
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
+  // NEW: Listen for home socket joining a private room for unread updates.
+  socket.on("joinUserRoom", (data) => {
+    if (data.email) {
+      const email = data.email.trim().toLowerCase();
+      socket.join(email);
+      console.log(`Socket ${socket.id} joined private room for ${email}`);
+    }
+  });
+
   // Listen for client joining a team room
   socket.on("joinTeam", async (data) => {
     try {
@@ -997,11 +1006,10 @@ io.on("connection", (socket) => {
       console.log(`Socket ${socket.id} joined room ${room}`);
       socket.emit("joinedTeam", { teamId });
 
-      // Mark messages as read for this user (unread=0) when they actively join the chat:
-      // (Alternatively, you can do this in a separate event or on "disconnect" from the chat screen.)
+      // Mark messages as read for this user (unread=0) when they actively join the chat.
       const key = `${teamId}_${userEmail}`;
-      unreadCounts[key] = 0; // Reset unread
-      // Send them an updated unread count of 0
+      unreadCounts[key] = 0; // Reset unread count
+      // Send updated unread count of 0 to that user's private room
       io.to(userEmail).emit("unreadCountUpdate", {
         teamId,
         unreadCount: 0,
@@ -1025,7 +1033,7 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
-      // Broadcast typing to all in the team except the sender
+      // Broadcast typing to all in the team except the sender.
       socket.to("team_" + teamId).emit("typing", {
         senderEmail: userEmail,
         senderName: userName,
@@ -1079,7 +1087,7 @@ io.on("connection", (socket) => {
         .collection("teams")
         .findOne({ _id: new mongoose.Types.ObjectId(teamId) });
       if (teamDoc) {
-        // Gather all user emails in the team
+        // Gather all user emails in the team.
         let allEmails = [teamDoc.leaderEmail || ""].concat(
           (teamDoc.members || []).map((m) => m.email)
         );
@@ -1088,15 +1096,10 @@ io.on("connection", (socket) => {
         for (const userEmail of allEmails) {
           if (userEmail !== senderEmail) {
             const key = `${teamId}_${userEmail}`;
-            // If the user is "inside" the chat screen, we likely set unread=0
-            // But if not inside the chat screen, increment
             if (unreadCounts[key] == null) {
               unreadCounts[key] = 0;
             }
-            // If that user hasn’t joined the chat screen, increment
             unreadCounts[key] += 1;
-
-            // Emit updated unread count to that user’s "private" room if they're connected
             io.to(userEmail).emit("unreadCountUpdate", {
               teamId,
               unreadCount: unreadCounts[key],
