@@ -938,6 +938,7 @@ const io = new Server(server, {
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
+  // Listen for client joining a team room
   socket.on("joinTeam", async (data) => {
     try {
       const { teamId, token } = data;
@@ -968,7 +969,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Check membership: compare leaderEmail and members.email in a case-insensitive way
+      // Check membership: compare leaderEmail and members.email case-insensitively
       const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
       const isLeader = leaderEmail === userEmail;
       const isMember =
@@ -993,9 +994,35 @@ io.on("connection", (socket) => {
     }
   });
 
+  // NEW: Listen for "typing" events and broadcast to others in the room
+  socket.on("typing", (data) => {
+    try {
+      const { teamId, token, typing } = data;
+      if (!teamId || !token) return;
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+      } catch (err) {
+        return;
+      }
+      const userEmail = (decoded.email || "").trim().toLowerCase();
+      const userName = decoded.username || "User";
+      // Broadcast the typing status to everyone in the room except the sender.
+      socket.to("team_" + teamId).emit("typing", {
+        senderEmail: userEmail,
+        senderName: userName,
+        typing: typing,
+      });
+    } catch (error) {
+      console.error("Typing event error:", error);
+    }
+  });
+
+  // Listen for team chat messages with reply-to support
   socket.on("teamMessage", async (data) => {
     try {
-      const { teamId, token, message } = data;
+      // Accept an optional replyTo field.
+      const { teamId, token, message, replyTo } = data;
       if (!teamId || !token || !message) {
         socket.emit("error", { message: "Missing required fields." });
         return;
@@ -1012,7 +1039,7 @@ io.on("connection", (socket) => {
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Save the message in the 'teamchats' collection (persistent storage)
+      // Build the message document – include replyTo if provided.
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
@@ -1022,9 +1049,12 @@ io.on("connection", (socket) => {
         message,
         timestamp: new Date(),
       };
+      if (replyTo != null) {
+        messageDoc.replyTo = replyTo;
+      }
       await teamChatsCollection.insertOne(messageDoc);
 
-      // Broadcast the new message to all sockets in the room
+      // Broadcast the new message to all sockets in the team room
       io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
     } catch (error) {
       console.error("teamMessage error:", error);
@@ -1037,7 +1067,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// Finally, start the server using the HTTP server
+// Start the server using the HTTP server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
