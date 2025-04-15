@@ -73,8 +73,7 @@ const announcements = [
   {
     id: 1,
     title: "New Feature Release",
-    description:
-      "Now user can view tasks in team and tasks section",
+    description: "Now user can view tasks in team and tasks section",
     fullText:
       "We have updated a new feature in team and tasks section where users can now check on the tasks assigned to them by team leader. This feature will enable updates to the user without requirement of laptop or desktop to check on assigned tasks quickly",
   },
@@ -787,6 +786,44 @@ app.get("/api/tasks", async (req, res) => {
     console.error("Error fetching tasks:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
+});
+
+// ------------------------------
+// Platform Updates Endpoint
+// ------------------------------
+
+// In-memory array for platform updates – admin can update these objects.
+const platformUpdates = [
+  {
+    id: 1,
+    title: "Platform Intelligence - Image Analysis",
+    date: "2025-04-10",
+    isNew: true,
+    description:
+      "New feature in ContentHub for analysing images in detail, powered by the new llama 4 scout model.",
+  },
+  {
+    id: 2,
+    title: "System maintenance scheduled",
+    date: "2025-04-27",
+    isNew: false,
+    description:
+      "The platform will undergo maintenance with improvements in security and user experience.",
+  },
+  {
+    id: 3,
+    title: "On-Planning Calendar Update",
+    date: "2025-04-29",
+    isNew: false,
+    description:
+      "A new calendar feature is now available to enable a more personalized user experience.",
+  },
+  // Admin can add more update objects or remove any existing one here.
+];
+
+// Endpoint: Get all platform updates.
+app.get("/api/platformupdates", (req, res) => {
+  return res.status(200).json({ updates: platformUpdates });
 });
 
 app.listen(PORT, () => {
