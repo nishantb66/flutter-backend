@@ -90,10 +90,8 @@ const announcements = [
   {
     id: 3,
     title: "Miscellaneous",
-    description:
-      "More updates on app will be visible here.",
-    fullText:
-      "Stay tunned",
+    description: "More updates on app will be visible here.",
+    fullText: "Stay tunned",
   },
 ];
 
@@ -134,28 +132,41 @@ app.post("/api/register", async (req, res) => {
 });
 
 // ------------------------------
-// Login endpoint
+// Login endpoint (portal DB 'test' → 'users' collection)
 // ------------------------------
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
+
   try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
+    // 1. Look up user in the portal DB
+    const testDb = portalConnection.useDb("test");
+    const user = await testDb.collection("users").findOne({ email });
+    if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
+    }
 
-    // Include email in the token payload.
+    // 2. Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    // 3. Sign token with email, name, emp_id, role
     const token = jwt.sign(
-      { userId: user._id, username: user.username, email: user.email },
+      {
+        email: user.email,
+        name: user.name,
+        emp_id: user.emp_id,
+        role: user.role,
+      },
       JWT_SECRET,
       { expiresIn: "6d" }
     );
 
+    // 4. Return token
     res.status(200).json({ message: "Login successful", token });
   } catch (err) {
-    console.error(err);
+    console.error("Login error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
