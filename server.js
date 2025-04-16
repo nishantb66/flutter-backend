@@ -915,52 +915,14 @@ app.get("/api/teamchats/:teamId", async (req, res) => {
     }
     const testDb = portalConnection.useDb("test");
     const teamChatsCollection = testDb.collection("teamchats");
+    // Retrieve messages for this team sorted by timestamp (oldest first)
     const messages = await teamChatsCollection
       .find({ teamId })
       .sort({ timestamp: 1 })
       .toArray();
-
-    // **NEW CODE: Fetch the last read timestamp for the current user**
-    let decoded = jwt.verify(token, JWT_SECRET);
-    const currentUserEmail = (decoded.email || "").trim().toLowerCase();
-    const chatStatus = await testDb
-      .collection("chatStatus")
-      .findOne({ teamId, userEmail: currentUserEmail });
-    const lastRead = chatStatus ? chatStatus.lastRead : null;
-
-    return res.status(200).json({ messages, lastRead });
+    return res.status(200).json({ messages });
   } catch (error) {
     console.error("Error loading team chats:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-app.post("/api/teamchats/lastread", async (req, res) => {
-  try {
-    const { teamId } = req.body;
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authHeader.split(" ")[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ message: "Invalid token." });
-    }
-    const userEmail = (decoded.email || "").trim().toLowerCase();
-    const testDb = portalConnection.useDb("test");
-    await testDb
-      .collection("chatStatus")
-      .updateOne(
-        { teamId, userEmail },
-        { $set: { lastRead: new Date() } },
-        { upsert: true }
-      );
-    return res.status(200).json({ message: "Last read updated." });
-  } catch (error) {
-    console.error("Error updating last read:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -987,7 +949,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Verify token & parse email (lowercase)
+      // Verify token & parse email in lowercase
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -1026,15 +988,6 @@ io.on("connection", (socket) => {
       socket.join(room);
       console.log(`Socket ${socket.id} joined room ${room}`);
       socket.emit("joinedTeam", { teamId });
-
-      // **NEW CODE: Update the user's last read time when joining the room**
-      await testDb
-        .collection("chatStatus")
-        .updateOne(
-          { teamId, userEmail },
-          { $set: { lastRead: new Date() } },
-          { upsert: true }
-        );
     } catch (error) {
       console.error("joinTeam error:", error);
       socket.emit("error", { message: "Error joining team." });
