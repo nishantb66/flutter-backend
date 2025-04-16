@@ -927,9 +927,7 @@ app.get("/api/teamchats/:teamId", async (req, res) => {
   }
 });
 
-// ------------------------------
-// Socket.IO for Team Chat (Updated for image messages)
-// ------------------------------
+// Create HTTP server and attach Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -996,7 +994,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for "typing" events and broadcast to others in the room
+  // NEW: Listen for "typing" events and broadcast to others in the room
   socket.on("typing", (data) => {
     try {
       const { teamId, token, typing } = data;
@@ -1009,6 +1007,7 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
+      // Broadcast the typing status to everyone in the room except the sender.
       socket.to("team_" + teamId).emit("typing", {
         senderEmail: userEmail,
         senderName: userName,
@@ -1019,17 +1018,13 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for team chat messages (including support for images and reply-to)
-  // Listen for team chat messages (including support for base64 image data and reply-to)
+  // Listen for team chat messages with reply-to support
   socket.on("teamMessage", async (data) => {
     try {
-      // Accept an optional replyTo and imageData field.
-      const { teamId, token, message, replyTo, imageData } = data;
-      // Require at least one of message text or imageData
-      if (!teamId || !token || (!message && !imageData)) {
-        socket.emit("error", {
-          message: "Missing required fields. Provide text or an image.",
-        });
+      // Accept an optional replyTo field.
+      const { teamId, token, message, replyTo } = data;
+      if (!teamId || !token || !message) {
+        socket.emit("error", { message: "Missing required fields." });
         return;
       }
 
@@ -1044,21 +1039,16 @@ io.on("connection", (socket) => {
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Build the message document – include replyTo and imageData if provided.
+      // Build the message document – include replyTo if provided.
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
         teamId,
         senderEmail: userEmail,
         senderName: userName,
+        message,
         timestamp: new Date(),
       };
-      if (message) {
-        messageDoc.message = message;
-      }
-      if (imageData) {
-        messageDoc.imageData = imageData;
-      }
       if (replyTo != null) {
         messageDoc.replyTo = replyTo;
       }
