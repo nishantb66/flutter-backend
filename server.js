@@ -997,6 +997,55 @@ app.get("/api/teams/members", async (req, res) => {
 });
 
 // ------------------------------
+// Manager Access Status endpoint
+// ------------------------------
+app.get("/api/manager-access", async (req, res) => {
+  try {
+    // 1. Verify JWT in Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    // 2. Extract email
+    const userEmail = (decoded.email || "").trim().toLowerCase();
+    if (!userEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+
+    // 3. Query the portal (test) DB’s managerAccess collection
+    const testDb = portalConnection.useDb("test");
+    const record = await testDb
+      .collection("managerAccess")
+      .findOne({ userEmail });
+
+    // 4. If no request was ever made:
+    if (!record) {
+      return res.status(200).json({
+        status: "None",
+        createdAt: null,
+      });
+    }
+
+    // 5. Return status and createdAt (as ISO string)
+    return res.status(200).json({
+      status: record.status, // "Approved" | "Rejected" | "Pending"
+      createdAt: record.createdAt, // e.g. 2025-04-06T22:21:57.542Z
+    });
+  } catch (err) {
+    console.error("GET /api/manager-access error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
 app.get("/api/teamchats/:teamId", async (req, res) => {
