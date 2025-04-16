@@ -897,6 +897,94 @@ app.get("/api/profile", async (req, res) => {
   }
 });
 
+/********************************************************************
+ * GET /api/teams/members
+ * Returns the list of members (and the leader) in the team to which
+ * the user (as determined by token) currently belongs.
+ ********************************************************************/
+app.get("/api/teams/members", async (req, res) => {
+  try {
+    // 1. Check and verify JWT token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Token expired or invalid" });
+    }
+
+    const userEmailFromToken = (decoded.email || "").trim().toLowerCase();
+
+    // 2. Check if user is in a team
+    const testDb = portalConnection.useDb("test");
+    const teamsCollection = testDb.collection("teams");
+
+    // Find team where user is either the leader or a member
+    const team = await teamsCollection.findOne({
+      $or: [
+        {
+          leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") },
+        },
+        {
+          "members.email": {
+            $regex: new RegExp(`^${userEmailFromToken}$`, "i"),
+          },
+        },
+      ],
+    });
+
+    if (!team) {
+      // User is not in any team
+      return res.status(404).json({
+        message: "You are not currently a member of any team.",
+      });
+    }
+
+    // 3. Get leader name from main Users collection
+    const usersCollectionMain = mongoose.connection.db.collection("users");
+    const leaderDoc = await usersCollectionMain.findOne({
+      email: { $regex: new RegExp(`^${team.leaderEmail}$`, "i") },
+    });
+    const leaderName =
+      leaderDoc && leaderDoc.username ? leaderDoc.username : "User";
+
+    // 4. Build the array of members, attaching username if found
+    const membersWithNames = Array.isArray(team.members)
+      ? await Promise.all(
+          team.members.map(async (m) => {
+            const userDoc = await usersCollectionMain.findOne({
+              email: { $regex: new RegExp(`^${m.email}$`, "i") },
+            });
+            const memberName =
+              userDoc && userDoc.username ? userDoc.username : "User";
+            return {
+              email: m.email,
+              name: memberName,
+              // any other fields you want
+            };
+          })
+        )
+      : [];
+
+    // 5. Return final JSON
+    return res.status(200).json({
+      leader: {
+        email: team.leaderEmail,
+        name: leaderName,
+      },
+      members: membersWithNames,
+    });
+  } catch (err) {
+    console.error("Error fetching team members:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
