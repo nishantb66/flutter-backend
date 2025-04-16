@@ -1020,12 +1020,13 @@ io.on("connection", (socket) => {
   });
 
   // Listen for team chat messages (including support for images and reply-to)
+  // Listen for team chat messages (including support for base64 image data and reply-to)
   socket.on("teamMessage", async (data) => {
     try {
-      // Accept an optional replyTo and imageUrl field.
-      const { teamId, token, message, replyTo, imageUrl } = data;
-      // Require at least one of message text or imageUrl
-      if (!teamId || !token || (!message && !imageUrl)) {
+      // Accept an optional replyTo and imageData field.
+      const { teamId, token, message, replyTo, imageData } = data;
+      // Require at least one of message text or imageData
+      if (!teamId || !token || (!message && !imageData)) {
         socket.emit("error", {
           message: "Missing required fields. Provide text or an image.",
         });
@@ -1043,7 +1044,7 @@ io.on("connection", (socket) => {
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
 
-      // Build the message document – include replyTo and imageUrl if provided.
+      // Build the message document – include replyTo and imageData if provided.
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
@@ -1055,8 +1056,8 @@ io.on("connection", (socket) => {
       if (message) {
         messageDoc.message = message;
       }
-      if (imageUrl) {
-        messageDoc.imageUrl = imageUrl;
+      if (imageData) {
+        messageDoc.imageData = imageData;
       }
       if (replyTo != null) {
         messageDoc.replyTo = replyTo;
