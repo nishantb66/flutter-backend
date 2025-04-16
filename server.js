@@ -87,14 +87,14 @@ const announcements = [
     fullText:
       "Please note that system maintenance is scheduled for this weekend. The maintenance window is planned to take place on Saturday from 2 PM to 6 PM. Kindly plan your work accordingly.",
   },
-  // {
-  //   id: 3,
-  //   title: "Employee Spotlight",
-  //   description:
-  //     "Celebrating our top performers this month. Tap to read the story.",
-  //   fullText:
-  //     "This month, we are celebrating our top performers who have consistently gone above and beyond. Read on to discover their achievements and inspiring stories.",
-  // },
+  {
+    id: 3,
+    title: "Miscellaneous",
+    description:
+      "More updates on app will be visible here.",
+    fullText:
+      "Stay tunned",
+  },
 ];
 
 // Endpoint: Get all announcements (for carousel)
