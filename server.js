@@ -915,6 +915,7 @@ app.get("/api/teamchats/:teamId", async (req, res) => {
     }
     const testDb = portalConnection.useDb("test");
     const teamChatsCollection = testDb.collection("teamchats");
+    // Retrieve messages for this team sorted by timestamp (oldest first)
     const messages = await teamChatsCollection
       .find({ teamId })
       .sort({ timestamp: 1 })
@@ -926,19 +927,18 @@ app.get("/api/teamchats/:teamId", async (req, res) => {
   }
 });
 
-// ------------------------------
-// SOCKET.IO: Chat and Audio Message Events
-// ------------------------------
+// Create HTTP server and attach Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // Adjust if needed
   },
 });
 
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
+  // Listen for client joining a team room
   socket.on("joinTeam", async (data) => {
     try {
       const { teamId, token } = data;
@@ -948,6 +948,8 @@ io.on("connection", (socket) => {
         });
         return;
       }
+
+      // Verify token & parse email in lowercase
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -956,6 +958,8 @@ io.on("connection", (socket) => {
         return;
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
+
+      // Get the team document from the "teams" collection
       const testDb = portalConnection.useDb("test");
       const team = await testDb.collection("teams").findOne({
         _id: new mongoose.Types.ObjectId(teamId),
@@ -964,6 +968,8 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Team not found." });
         return;
       }
+
+      // Check membership: compare leaderEmail and members.email case-insensitively
       const leaderEmail = (team.leaderEmail || "").trim().toLowerCase();
       const isLeader = leaderEmail === userEmail;
       const isMember =
@@ -971,10 +977,13 @@ io.on("connection", (socket) => {
         team.members.some(
           (m) => (m.email || "").trim().toLowerCase() === userEmail
         );
+
       if (!isLeader && !isMember) {
         socket.emit("error", { message: "Not authorized to join this team." });
         return;
       }
+
+      // Join the Socket.IO room named "team_<teamId>"
       const room = "team_" + teamId;
       socket.join(room);
       console.log(`Socket ${socket.id} joined room ${room}`);
@@ -985,7 +994,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for typing events
+  // NEW: Listen for "typing" events and broadcast to others in the room
   socket.on("typing", (data) => {
     try {
       const { teamId, token, typing } = data;
@@ -998,6 +1007,7 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
+      // Broadcast the typing status to everyone in the room except the sender.
       socket.to("team_" + teamId).emit("typing", {
         senderEmail: userEmail,
         senderName: userName,
@@ -1008,14 +1018,17 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Listen for text messages (including optional replyTo)
+  // Listen for team chat messages with reply-to support
   socket.on("teamMessage", async (data) => {
     try {
+      // Accept an optional replyTo field.
       const { teamId, token, message, replyTo } = data;
       if (!teamId || !token || !message) {
         socket.emit("error", { message: "Missing required fields." });
         return;
       }
+
+      // Verify token & get normalized email
       let decoded;
       try {
         decoded = jwt.verify(token, JWT_SECRET);
@@ -1025,6 +1038,8 @@ io.on("connection", (socket) => {
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
       const userName = decoded.username || "User";
+
+      // Build the message document – include replyTo if provided.
       const testDb = portalConnection.useDb("test");
       const teamChatsCollection = testDb.collection("teamchats");
       const messageDoc = {
@@ -1038,49 +1053,12 @@ io.on("connection", (socket) => {
         messageDoc.replyTo = replyTo;
       }
       await teamChatsCollection.insertOne(messageDoc);
+
+      // Broadcast the new message to all sockets in the team room
       io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
     } catch (error) {
       console.error("teamMessage error:", error);
       socket.emit("error", { message: "Error sending team message." });
-    }
-  });
-
-  // NEW: Listen for audio messages
-  socket.on("teamAudioMessage", async (data) => {
-    try {
-      const { teamId, token, audioBase64, duration } = data;
-      if (!teamId || !token || !audioBase64) {
-        socket.emit("error", { message: "Missing required fields for audio." });
-        return;
-      }
-      let decoded;
-      try {
-        decoded = jwt.verify(token, JWT_SECRET);
-      } catch (err) {
-        socket.emit("error", { message: "Invalid token." });
-        return;
-      }
-      const userEmail = (decoded.email || "").trim().toLowerCase();
-      const userName = decoded.username || "User";
-      const testDb = portalConnection.useDb("test");
-      const teamChatsCollection = testDb.collection("teamchats");
-      const messageDoc = {
-        teamId,
-        senderEmail: userEmail,
-        senderName: userName,
-        message: "[Audio Message]",
-        audio: {
-          data: audioBase64,
-          duration: duration, // in seconds
-        },
-        timestamp: new Date(),
-        type: "audio",
-      };
-      await teamChatsCollection.insertOne(messageDoc);
-      io.to("team_" + teamId).emit("newTeamMessage", messageDoc);
-    } catch (error) {
-      console.error("teamAudioMessage error:", error);
-      socket.emit("error", { message: "Error sending audio message." });
     }
   });
 
@@ -1089,6 +1067,7 @@ io.on("connection", (socket) => {
   });
 });
 
+// Start the server using the HTTP server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
