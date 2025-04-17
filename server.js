@@ -1055,7 +1055,7 @@ const inventoryColl = portalConnection
 
 app.post("/api/ai-query", async (req, res) => {
   try {
-    // (a) Verify JWT
+    // (1) Verify JWT
     const authHeader = req.headers.authorization || "";
     if (!authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -1070,21 +1070,21 @@ app.post("/api/ai-query", async (req, res) => {
     const empId = decoded.emp_id;
     const userName = decoded.username || "User";
 
-    // (b) Fetch this user’s meetings
+    // (2) Fetch this user’s meetings
     const rawMeetings = await meetingsColl
       .find({
         $or: [{ hostEmpId: empId }, { invitedEmpIds: empId }],
       })
-      // optional: .project({ /* ... */ })
       .toArray();
 
-    // (c) Convert each meeting’s times into IST strings
+    // (3) Convert each meeting’s times into IST and include hostName
     const meetings = rawMeetings.map((m) => ({
       meetingRoom: m.meetingRoom,
       department: m.department,
+      hostName: m.hostName,
+      hostDesignation: m.hostDesignation,
       hostEmpId: m.hostEmpId,
       invitedEmpIds: m.invitedEmpIds,
-      // convert UTC→IST via toLocaleString with Asia/Kolkata timezone
       startTimeIST: new Date(m.startTime).toLocaleString("en-IN", {
         timeZone: "Asia/Kolkata",
       }),
@@ -1093,18 +1093,18 @@ app.post("/api/ai-query", async (req, res) => {
       }),
     }));
 
-    // (d) Fetch this user’s inventory (no changes needed)
+    // (4) Fetch this user’s inventory (omit the large base64)
     const inventory = await inventoryColl
       .find({ empId: empId })
       .project({ fileData: 0 })
       .toArray();
 
-    // (e) Get “today” in IST
+    // (5) Get “today” in IST
     const todayIST = new Date().toLocaleString("en-IN", {
       timeZone: "Asia/Kolkata",
     });
 
-    // (f) Build the system prompt
+    // (6) Build the system prompt
     const systemPrompt = {
       role: "system",
       content: `
@@ -1115,7 +1115,7 @@ You may only answer using this specific user’s data:
 • Username: ${userName}
 • Employee ID: ${empId}
 
-Meetings (with all times shown in IST):
+Meetings (times in IST):
 ${JSON.stringify(meetings, null, 2)}
 
 Personal inventory items:
@@ -1126,7 +1126,7 @@ Always treat the above as the *only* source of truth.
 `.trim(),
     };
 
-    // (g) Sanitize & combine incoming messages
+    // (7) Sanitize & combine incoming messages
     if (!Array.isArray(req.body.messages)) {
       return res
         .status(400)
@@ -1138,7 +1138,7 @@ Always treat the above as the *only* source of truth.
     }));
     const allMessages = [systemPrompt, ...userMsgs];
 
-    // (h) Call Groq
+    // (8) Call Groq
     const chatCompletion = await groq.chat.completions.create({
       messages: allMessages,
       model: "llama3-70b-8192",
