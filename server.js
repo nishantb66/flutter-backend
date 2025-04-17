@@ -440,7 +440,7 @@ app.post("/api/meeting", async (req, res) => {
           roomId: roomId,
           booked: true,
           bookingDetails: {
-            hostName: decoded.username,
+            hostName: decoded.name,
             hostEmail: decoded.email,
             hostDesignation: hostDesignation,
             topic: topic,
@@ -523,7 +523,7 @@ app.get("/api/teams", async (req, res) => {
                 email: { $regex: new RegExp(`^${m.email}$`, "i") },
               });
               const memberName =
-                userDoc && userDoc.username ? userDoc.username : "User";
+                userDoc && userDoc.name ? userDoc.name : "User";
               return {
                 email: m.email,
                 name: memberName,
@@ -719,7 +719,7 @@ app.post("/api/chat", async (req, res) => {
     } catch (err) {
       return res.status(401).json({ message: "Please log in to view" });
     }
-    const userName = decoded.username || "User";
+    const userName = decoded.name || "User";
     const userEmail = decoded.email || "";
 
     // 2. Parse the incoming messages array
@@ -972,7 +972,7 @@ app.get("/api/teams/members", async (req, res) => {
               email: { $regex: new RegExp(`^${m.email}$`, "i") },
             });
             const memberName =
-              userDoc && userDoc.username ? userDoc.username : "User";
+              userDoc && userDoc.name ? userDoc.name : "User";
             return {
               email: m.email,
               name: memberName,
@@ -1068,7 +1068,7 @@ app.post("/api/ai-query", async (req, res) => {
       return res.status(401).json({ message: "Invalid token" });
     }
     const empId = decoded.emp_id;
-    const userName = decoded.username || "User";
+    const userName = decoded.name || "User";
 
     // (2) Fetch this user’s meetings
     const rawMeetings = await meetingsColl
@@ -1265,7 +1265,7 @@ io.on("connection", (socket) => {
         return;
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
-      const userName = decoded.username || "User";
+      const userName = decoded.name || "User";
       // Broadcast the typing status to everyone in the room except the sender.
       socket.to("team_" + teamId).emit("typing", {
         senderEmail: userEmail,
@@ -1296,7 +1296,7 @@ io.on("connection", (socket) => {
         return;
       }
       const userEmail = (decoded.email || "").trim().toLowerCase();
-      const userName = decoded.username || "User";
+      const userName = decoded.name || "User";
 
       // Build the message document – include replyTo if provided.
       const testDb = portalConnection.useDb("test");
