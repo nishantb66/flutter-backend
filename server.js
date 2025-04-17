@@ -1045,13 +1045,13 @@ app.get("/api/manager-access", async (req, res) => {
   }
 });
 
-// Make sure you have these two lines up where you configure your portalConnection:
+// near the top of server.js, after you set up portalConnection:
 const meetingsColl = portalConnection.useDb("test").collection("meetings");
 const inventoryColl = portalConnection
   .useDb("test")
   .collection("personalInventory");
 
-// …later in server.js, replace your old /api/ai-query with this:
+// …later, replace your old /api/ai-query with this:
 
 app.post("/api/ai-query", async (req, res) => {
   try {
@@ -1070,59 +1070,75 @@ app.post("/api/ai-query", async (req, res) => {
     const empId = decoded.emp_id;
     const userName = decoded.username || "User";
 
-    // (b) Fetch that user’s meetings (hosted or invited)
-    const meetings = await meetingsColl
+    // (b) Fetch this user’s meetings
+    const rawMeetings = await meetingsColl
       .find({
         $or: [{ hostEmpId: empId }, { invitedEmpIds: empId }],
       })
-      // optional: .project({ /* ...exclude heavy or private fields... */ })
+      // optional: .project({ /* ... */ })
       .toArray();
 
-    // (c) Fetch that user’s inventory (omit the big base64 data)
+    // (c) Convert each meeting’s times into IST strings
+    const meetings = rawMeetings.map((m) => ({
+      meetingRoom: m.meetingRoom,
+      department: m.department,
+      hostEmpId: m.hostEmpId,
+      invitedEmpIds: m.invitedEmpIds,
+      // convert UTC→IST via toLocaleString with Asia/Kolkata timezone
+      startTimeIST: new Date(m.startTime).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+      }),
+      endTimeIST: new Date(m.endTime).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+      }),
+    }));
+
+    // (d) Fetch this user’s inventory (no changes needed)
     const inventory = await inventoryColl
       .find({ empId: empId })
       .project({ fileData: 0 })
       .toArray();
 
-    // (d) Get current date/time
-    const nowIso = new Date().toISOString();
+    // (e) Get “today” in IST
+    const todayIST = new Date().toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+    });
 
-    // (e) Build the system prompt that seeds the AI with
-    //     – today’s date
-    //     – this user’s meetings & inventory only
+    // (f) Build the system prompt
     const systemPrompt = {
       role: "system",
-      content: `You are a secure AI assistant for Enterprise Portal.
-Current date/time: ${nowIso}
+      content: `
+You are a secure AI assistant for Enterprise Portal.
+Current date/time (IST): ${todayIST}
 
 You may only answer using this specific user’s data:
 • Username: ${userName}
 • Employee ID: ${empId}
 
-Meetings (hosting or invited):
+Meetings (with all times shown in IST):
 ${JSON.stringify(meetings, null, 2)}
 
 Personal inventory items:
 ${JSON.stringify(inventory, null, 2)}
 
 Under no circumstances reveal or reference any other user’s records.
-Always treat the above as the *only* source of truth.`,
+Always treat the above as the *only* source of truth.
+`.trim(),
     };
 
-    // (f) Validate & sanitize incoming messages array
+    // (g) Sanitize & combine incoming messages
     if (!Array.isArray(req.body.messages)) {
       return res
         .status(400)
-        .json({ message: "Bad payload: messages must be array" });
+        .json({ message: "Bad payload: messages must be an array" });
     }
     const userMsgs = req.body.messages.map((m) => ({
-      // enforce only "user" or "assistant"
       role: m.role === "assistant" ? "assistant" : "user",
-      content: m.content.toString(),
+      content: String(m.content),
     }));
-
-    // (g) Combine prompts & ask Groq
     const allMessages = [systemPrompt, ...userMsgs];
+
+    // (h) Call Groq
     const chatCompletion = await groq.chat.completions.create({
       messages: allMessages,
       model: "llama3-70b-8192",
