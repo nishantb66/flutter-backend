@@ -1045,6 +1045,84 @@ app.get("/api/manager-access", async (req, res) => {
   }
 });
 
+// 1) Make sure you have access to your test DB collections at the top:
+const meetingsColl = portalConnection.useDb("test").collection("meetings");
+const inventoryColl = portalConnection
+  .useDb("test")
+  .collection("personalInventory");
+
+// 2) New AI‐personalized endpoint
+app.post("/api/ai-query", async (req, res) => {
+  try {
+    // --- (a) verify JWT ---
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (_err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+    const empId = decoded.emp_id; // ← your emp_id field
+    const userName = decoded.username || "User";
+
+    // --- (b) fetch that user’s meetings ---
+    const meetings = await meetingsColl
+      .find({
+        $or: [{ hostEmpId: empId }, { invitedEmpIds: empId }],
+      })
+      .project({
+        /* you can exclude fields you don’t want the AI to see */
+      })
+      .toArray();
+
+    // --- (c) fetch that user’s inventory ---
+    const inventory = await inventoryColl
+      .find({ empId: empId })
+      .project({ fileData: 0 }) // strip the heavy base64 blob
+      .toArray();
+
+    // --- (d) build system prompt with user‐specific knowledge base ---
+    const systemPrompt = {
+      role: "system",
+      content: `You are an AI assistant for Enterprise Portal.
+Here is ${userName}’s personal data:
+• Meetings (hosted or invited): ${JSON.stringify(meetings, null, 2)}
+• Personal inventory items: ${JSON.stringify(inventory, null, 2)}
+Only answer questions using *this* data.  Do NOT reveal any other user’s records under any circumstance.`,
+    };
+
+    // --- (e) sanitize & combine with user messages ---
+    if (!Array.isArray(req.body.messages)) {
+      return res.status(400).json({ message: "Bad payload" });
+    }
+    const userMsgs = req.body.messages.map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content,
+    }));
+    const allMessages = [systemPrompt, ...userMsgs];
+
+    // --- (f) call Groq just like /api/chat ---
+    const chatCompletion = await groq.chat.completions.create({
+      messages: allMessages,
+      model: "llama3-70b-8192",
+      temperature: 1,
+      max_completion_tokens: 512,
+      top_p: 1,
+      stream: false,
+    });
+
+    const reply = chatCompletion.choices?.[0]?.message?.content || "";
+    return res.status(200).json({ reply });
+  } catch (error) {
+    console.error("AI‐Query error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
