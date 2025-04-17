@@ -1045,16 +1045,17 @@ app.get("/api/manager-access", async (req, res) => {
   }
 });
 
-// 1) Make sure you have access to your test DB collections at the top:
+// Make sure you have these two lines up where you configure your portalConnection:
 const meetingsColl = portalConnection.useDb("test").collection("meetings");
 const inventoryColl = portalConnection
   .useDb("test")
   .collection("personalInventory");
 
-// 2) New AI‐personalized endpoint
+// …later in server.js, replace your old /api/ai-query with this:
+
 app.post("/api/ai-query", async (req, res) => {
   try {
-    // --- (a) verify JWT ---
+    // (a) Verify JWT
     const authHeader = req.headers.authorization || "";
     if (!authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -1063,49 +1064,65 @@ app.post("/api/ai-query", async (req, res) => {
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
-    } catch (_err) {
+    } catch (err) {
       return res.status(401).json({ message: "Invalid token" });
     }
-    const empId = decoded.emp_id; // ← your emp_id field
+    const empId = decoded.emp_id;
     const userName = decoded.username || "User";
 
-    // --- (b) fetch that user’s meetings ---
+    // (b) Fetch that user’s meetings (hosted or invited)
     const meetings = await meetingsColl
       .find({
         $or: [{ hostEmpId: empId }, { invitedEmpIds: empId }],
       })
-      .project({
-        /* you can exclude fields you don’t want the AI to see */
-      })
+      // optional: .project({ /* ...exclude heavy or private fields... */ })
       .toArray();
 
-    // --- (c) fetch that user’s inventory ---
+    // (c) Fetch that user’s inventory (omit the big base64 data)
     const inventory = await inventoryColl
       .find({ empId: empId })
-      .project({ fileData: 0 }) // strip the heavy base64 blob
+      .project({ fileData: 0 })
       .toArray();
 
-    // --- (d) build system prompt with user‐specific knowledge base ---
+    // (d) Get current date/time
+    const nowIso = new Date().toISOString();
+
+    // (e) Build the system prompt that seeds the AI with
+    //     – today’s date
+    //     – this user’s meetings & inventory only
     const systemPrompt = {
       role: "system",
-      content: `You are an AI assistant for Enterprise Portal.
-Here is ${userName}’s personal data:
-• Meetings (hosted or invited): ${JSON.stringify(meetings, null, 2)}
-• Personal inventory items: ${JSON.stringify(inventory, null, 2)}
-Only answer questions using *this* data.  Do NOT reveal any other user’s records under any circumstance.`,
+      content: `You are a secure AI assistant for Enterprise Portal.
+Current date/time: ${nowIso}
+
+You may only answer using this specific user’s data:
+• Username: ${userName}
+• Employee ID: ${empId}
+
+Meetings (hosting or invited):
+${JSON.stringify(meetings, null, 2)}
+
+Personal inventory items:
+${JSON.stringify(inventory, null, 2)}
+
+Under no circumstances reveal or reference any other user’s records.
+Always treat the above as the *only* source of truth.`,
     };
 
-    // --- (e) sanitize & combine with user messages ---
+    // (f) Validate & sanitize incoming messages array
     if (!Array.isArray(req.body.messages)) {
-      return res.status(400).json({ message: "Bad payload" });
+      return res
+        .status(400)
+        .json({ message: "Bad payload: messages must be array" });
     }
     const userMsgs = req.body.messages.map((m) => ({
+      // enforce only "user" or "assistant"
       role: m.role === "assistant" ? "assistant" : "user",
-      content: m.content,
+      content: m.content.toString(),
     }));
-    const allMessages = [systemPrompt, ...userMsgs];
 
-    // --- (f) call Groq just like /api/chat ---
+    // (g) Combine prompts & ask Groq
+    const allMessages = [systemPrompt, ...userMsgs];
     const chatCompletion = await groq.chat.completions.create({
       messages: allMessages,
       model: "llama3-70b-8192",
