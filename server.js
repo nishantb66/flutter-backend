@@ -932,15 +932,13 @@ app.get("/api/teams/members", async (req, res) => {
     const userEmailFromToken = (decoded.email || "").trim().toLowerCase();
 
     // 2. Check if user is in a team
-    const testDb = portalConnection.useDb("test");
-    const teamsCollection = testDb.collection("teams");
+    const portalTestDb = portalConnection.useDb("test");
+    const teamsCollection = portalTestDb.collection("teams");
 
     // Find team where user is either the leader or a member
     const team = await teamsCollection.findOne({
       $or: [
-        {
-          leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") },
-        },
+        { leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") } },
         {
           "members.email": {
             $regex: new RegExp(`^${userEmailFromToken}$`, "i"),
@@ -956,23 +954,21 @@ app.get("/api/teams/members", async (req, res) => {
       });
     }
 
-    // 3. Get leader name from main Users collection
-    const usersCollectionMain = mongoose.connection.db.collection("users");
-    const leaderDoc = await usersCollectionMain.findOne({
+    // 3. Get leader name from portal DB’s users collection
+    const usersCollectionPortal = portalTestDb.collection("users");
+    const leaderDoc = await usersCollectionPortal.findOne({
       email: { $regex: new RegExp(`^${team.leaderEmail}$`, "i") },
     });
-    const leaderName =
-      leaderDoc && leaderDoc.username ? leaderDoc.username : "User";
+    const leaderName = leaderDoc && leaderDoc.name ? leaderDoc.name : "User";
 
-    // 4. Build the array of members, attaching username if found
+    // 4. Build the array of members, attaching name if found
     const membersWithNames = Array.isArray(team.members)
       ? await Promise.all(
           team.members.map(async (m) => {
-            const userDoc = await usersCollectionMain.findOne({
+            const userDoc = await usersCollectionPortal.findOne({
               email: { $regex: new RegExp(`^${m.email}$`, "i") },
             });
-            const memberName =
-              userDoc && userDoc.name ? userDoc.name : "User";
+            const memberName = userDoc && userDoc.name ? userDoc.name : "User";
             return {
               email: m.email,
               name: memberName,
