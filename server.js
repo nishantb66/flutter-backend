@@ -466,131 +466,120 @@ app.post("/api/meeting", async (req, res) => {
 // ------------------------------
 app.get("/api/teams", async (req, res) => {
   try {
+    // 1. Verify JWT
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const token = authHeader.split(" ")[1];
-
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ message: "Token expired or invalid" });
     }
-
     const userEmailFromToken = (decoded.email || "").trim().toLowerCase();
 
-    // If we only want to fetch the current user's team
-    if (req.query.myTeam === "1") {
-      const testDb = portalConnection.useDb("test");
-      const teamsCollection = testDb.collection("teams");
-
-      // Case-insensitive query to match leaderEmail or members.email
-      const team = await teamsCollection.findOne({
-        $or: [
-          {
-            leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") },
-          },
-          {
-            "members.email": {
-              $regex: new RegExp(`^${userEmailFromToken}$`, "i"),
-            },
-          },
-        ],
-      });
-
-      if (!team) {
-        // Not in any team
-        return res.status(200).json({ inTeam: false });
-      }
-
-      // Now, gather leader and member details for the response
-      const usersCollectionMain = mongoose.connection.db.collection("users");
-
-      // Leader doc
-      const leaderDoc = await usersCollectionMain.findOne({
-        email: { $regex: new RegExp(`^${team.leaderEmail}$`, "i") },
-      });
-      const leaderName =
-        leaderDoc && leaderDoc.username ? leaderDoc.username : "User";
-
-      // Map each member to add 'name' from main users collection
-      const membersWithNames = Array.isArray(team.members)
-        ? await Promise.all(
-            team.members.map(async (m) => {
-              const userDoc = await usersCollectionMain.findOne({
-                email: { $regex: new RegExp(`^${m.email}$`, "i") },
-              });
-              const memberName =
-                userDoc && userDoc.name ? userDoc.name : "User";
-              return {
-                email: m.email,
-                name: memberName,
-                invitedAt: m.invitedAt
-                  ? new Date(m.invitedAt).toLocaleString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                    })
-                  : null,
-                canAddMembers: m.canAddMembers || false,
-              };
-            })
-          )
-        : [];
-
-      // Process joinRequests if present
-      const joinRequests = (team.joinRequests || []).map((r) => ({
-        ...r,
-        requestedAt: r.requestedAt
-          ? new Date(r.requestedAt).toLocaleString("en-IN", {
-              timeZone: "Asia/Kolkata",
-            })
-          : null,
-      }));
-
-      // Process notice if present
-      const notice = team.notice
-        ? {
-            ...team.notice,
-            updatedAt: team.notice.updatedAt
-              ? new Date(team.notice.updatedAt).toLocaleString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                })
-              : null,
-          }
-        : null;
-
-      // Return the _id (as a string) so the frontend can store teamId
-      const responseTeam = {
-        _id: team._id.toString(), // <--- IMPORTANT
-        teamName: team.teamName,
-        teamDescription: team.teamDescription,
-        leaderEmail: team.leaderEmail,
-        leaderName: leaderName,
-        members: membersWithNames,
-        createdAt: team.createdAt
-          ? new Date(team.createdAt).toLocaleString("en-IN", {
-              timeZone: "Asia/Kolkata",
-            })
-          : null,
-        notice: notice,
-        joinRequests: joinRequests,
-      };
-
-      // Determine if this user is the leader (case-insensitive compare)
-      const isLeader =
-        team.leaderEmail.trim().toLowerCase() === userEmailFromToken;
-
-      // Return the final response
-      return res.status(200).json({
-        inTeam: true,
-        isLeader,
-        team: responseTeam,
-      });
-    } else {
-      // If the endpoint is called without ?myTeam=1, respond with an error or handle differently
+    // 2. Only handle if ?myTeam=1
+    if (req.query.myTeam !== "1") {
       return res.status(400).json({ message: "Invalid query parameter" });
     }
+
+    // 3. Use portalConnection for both teams AND users
+    const portalTestDb = portalConnection.useDb("test");
+    const teamsCollection = portalTestDb.collection("teams");
+    const usersCollection = portalTestDb.collection("users");
+
+    // 4. Find the team document
+    const team = await teamsCollection.findOne({
+      $or: [
+        { leaderEmail: { $regex: new RegExp(`^${userEmailFromToken}$`, "i") } },
+        {
+          "members.email": {
+            $regex: new RegExp(`^${userEmailFromToken}$`, "i"),
+          },
+        },
+      ],
+    });
+
+    if (!team) {
+      return res.status(200).json({ inTeam: false });
+    }
+
+    // 5. Lookup leader’s name from portal DB
+    const leaderDoc = await usersCollection.findOne({
+      email: { $regex: new RegExp(`^${team.leaderEmail}$`, "i") },
+    });
+    const leaderName = leaderDoc && leaderDoc.name ? leaderDoc.name : "User";
+
+    // 6. Build members array with names also from portal DB
+    const membersWithNames = Array.isArray(team.members)
+      ? await Promise.all(
+          team.members.map(async (m) => {
+            const userDoc = await usersCollection.findOne({
+              email: { $regex: new RegExp(`^${m.email}$`, "i") },
+            });
+            return {
+              email: m.email,
+              name: userDoc && userDoc.name ? userDoc.name : "User",
+              invitedAt: m.invitedAt
+                ? new Date(m.invitedAt).toLocaleString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                  })
+                : null,
+              canAddMembers: m.canAddMembers || false,
+            };
+          })
+        )
+      : [];
+
+    // 7. Process join requests & notice timestamps
+    const joinRequests = (team.joinRequests || []).map((r) => ({
+      ...r,
+      requestedAt: r.requestedAt
+        ? new Date(r.requestedAt).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : null,
+    }));
+    const notice = team.notice
+      ? {
+          ...team.notice,
+          updatedAt: team.notice.updatedAt
+            ? new Date(team.notice.updatedAt).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+              })
+            : null,
+        }
+      : null;
+
+    // 8. Assemble the response payload
+    const responseTeam = {
+      _id: team._id.toString(),
+      teamName: team.teamName,
+      teamDescription: team.teamDescription,
+      leaderEmail: team.leaderEmail,
+      leaderName,
+      members: membersWithNames,
+      createdAt: team.createdAt
+        ? new Date(team.createdAt).toLocaleString("en-IN", {
+            timeZone: "Asia/Kolkata",
+          })
+        : null,
+      notice,
+      joinRequests,
+    };
+
+    // 9. Determine leadership flag
+    const isLeader =
+      team.leaderEmail.trim().toLowerCase() === userEmailFromToken;
+
+    // 10. Return
+    return res.status(200).json({
+      inTeam: true,
+      isLeader,
+      team: responseTeam,
+    });
   } catch (err) {
     console.error("Error fetching team details:", err);
     return res.status(500).json({ message: "Internal server error" });
