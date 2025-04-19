@@ -1141,6 +1141,39 @@ Always treat the above as the *only* source of truth.
   }
 });
 
+app.get("/api/check-profile", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userEmail = (decoded.email || "").trim().toLowerCase();
+
+    if (!userEmail) {
+      return res.status(400).json({ message: "Invalid token: email missing" });
+    }
+
+    const testDb = portalConnection.useDb("test");
+    const userDoc = await testDb.collection("users").findOne({
+      email: { $regex: new RegExp(`^${userEmail}$`, "i") },
+    });
+
+    if (!userDoc) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const hasProfile =
+      userDoc.profile && Object.keys(userDoc.profile).length > 0;
+
+    return res.status(200).json({ hasProfile });
+  } catch (err) {
+    console.error("Check Profile Error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
