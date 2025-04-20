@@ -1191,13 +1191,13 @@ app.post("/api/send-mail", async (req, res) => {
     const senderName = decoded.name;
     const senderEmail = decoded.email;
 
-    // 2. Extract & validate payload
+    // 2. Validate payload
     const { toEmpId, message } = req.body;
     if (!toEmpId || !message) {
       return res.status(400).json({ message: "Missing toEmpId or message" });
     }
 
-    // 3. Verify receiver exists and grab their name/email
+    // 3. Verify receiver exists
     const testDb = portalConnection.useDb("test");
     const receiver = await testDb
       .collection("users")
@@ -1205,30 +1205,27 @@ app.post("/api/send-mail", async (req, res) => {
     if (!receiver) {
       return res.status(400).json({ message: "Incorrect receiver Emp ID" });
     }
-    const toName = receiver.name;
-    const toEmail = receiver.email;
 
-    // 4. Insert into inbox collection
+    // 4. Insert with readBy = [sender] so sender sees it as read
     await inboxColl.insertOne({
       fromEmpId: senderEmpId,
       fromName: senderName,
       fromEmail: senderEmail,
       toEmpId: toEmpId,
-      toName: toName,
-      toEmail: toEmail,
-      message: message,
+      toName: receiver.name,
+      toEmail: receiver.email,
+      message,
       timestamp: new Date(),
       replies: [],
+      readBy: [senderEmpId.toString()], // mark as read by sender
     });
 
-    // 5. Respond
-    res.status(201).json({ message: "Mail sent successfully" });
+    return res.status(201).json({ message: "Mail sent successfully" });
   } catch (err) {
     console.error("SEND MAIL ERROR:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
-
 
 // ─── List inbox (sent + received) ───
 app.get("/api/inbox", async (req, res) => {
@@ -1240,10 +1237,7 @@ app.get("/api/inbox", async (req, res) => {
 
     const docs = await inboxColl
       .find({
-        $or: [
-          { toEmpId: empId },
-          { fromEmpId: empId }
-        ]
+        $or: [{ toEmpId: empId }, { fromEmpId: empId }],
       })
       .sort({ timestamp: -1 })
       .toArray();
@@ -1264,18 +1258,26 @@ app.get("/api/inbox/:id", async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
     const token = auth.slice(7);
-    jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const empId = decoded.emp_id.toString();
 
+    // 1. Mark as read by this user
+    await inboxColl.updateOne(
+      { _id: new mongoose.Types.ObjectId(req.params.id) },
+      { $addToSet: { readBy: empId } }
+    );
+
+    // 2. Fetch and return
     const mail = await inboxColl.findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id)
+      _id: new mongoose.Types.ObjectId(req.params.id),
     });
     if (!mail) {
       return res.status(404).json({ message: "Mail not found" });
     }
-    res.status(200).json(mail);
+    return res.status(200).json(mail);
   } catch (err) {
     console.error("GET MAIL ERROR:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
@@ -1288,39 +1290,48 @@ app.post("/api/inbox/:id/reply", async (req, res) => {
     }
     const token = auth.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
-    const replierName  = decoded.name;
-    const replierEmpId = decoded.emp_id;
-    const { reply }    = req.body;
+    const replierId = decoded.emp_id.toString();
+    const { reply } = req.body;
     if (!reply) {
       return res.status(400).json({ message: "Reply cannot be empty" });
     }
 
-    // push into replies array
+    // determine other party (to reset their read flag)
+    const mailDoc = await inboxColl.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.id),
+    });
+    if (!mailDoc) {
+      return res.status(404).json({ message: "Mail not found" });
+    }
+    const otherId =
+      mailDoc.fromEmpId.toString() === replierId
+        ? mailDoc.toEmpId.toString()
+        : mailDoc.fromEmpId.toString();
+
+    // Push reply, set readBy to only the replier (so other sees unread)
     const result = await inboxColl.updateOne(
       { _id: new mongoose.Types.ObjectId(req.params.id) },
       {
         $push: {
           replies: {
-            replierName,
-            replierEmpId,
+            replierName: decoded.name,
+            replierEmpId: replierId,
             reply,
-            timestamp: new Date()
-          }
-        }
+            timestamp: new Date(),
+          },
+        },
+        $set: { readBy: [replierId] },
       }
     );
     if (result.matchedCount === 0) {
       return res.status(404).json({ message: "Mail not found" });
     }
-    res.status(200).json({ message: "Reply sent" });
+    return res.status(200).json({ message: "Reply sent" });
   } catch (err) {
     console.error("REPLY ERROR:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
-
-
-
 
 
 
