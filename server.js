@@ -1174,18 +1174,20 @@ app.get("/api/check-profile", async (req, res) => {
   }
 });
 
-inboxColl = portalConnection.useDb("test").collection("inbox");
+// ─── near the top, after portalConnection is opened ───
+const inboxColl = portalConnection.useDb("test").collection("inbox");
 
+// ─── Send a new mail ───
 app.post("/api/send-mail", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const token = authHeader.slice(7);
+    const token = auth.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
     const senderEmpId = decoded.emp_id;
-    const senderName = decoded.name;
+    const senderName  = decoded.name;
     const senderEmail = decoded.email;
 
     const { toEmpId, message } = req.body;
@@ -1193,24 +1195,24 @@ app.post("/api/send-mail", async (req, res) => {
       return res.status(400).json({ message: "Missing toEmpId or message" });
     }
 
-    // Verify receiver exists
+    // verify receiver exists
     const testDb = portalConnection.useDb("test");
-    const receiverDoc = await testDb
+    const receiver = await testDb
       .collection("users")
       .findOne({ emp_id: toEmpId });
-    if (!receiverDoc) {
+    if (!receiver) {
       return res.status(400).json({ message: "Incorrect receiver Emp ID" });
     }
 
-    // Save to inbox
+    // save
     await inboxColl.insertOne({
-      fromEmpId: senderEmpId,
-      fromName: senderName,
-      fromEmail: senderEmail,
+      fromEmpId:  senderEmpId,
+      fromName:   senderName,
+      fromEmail:  senderEmail,
       toEmpId,
       message,
-      timestamp: new Date(),
-      replies: [],
+      timestamp:  new Date(),
+      replies:    []
     });
 
     res.status(201).json({ message: "Mail sent successfully" });
@@ -1220,39 +1222,44 @@ app.post("/api/send-mail", async (req, res) => {
   }
 });
 
+// ─── List inbox (sent + received) ───
 app.get("/api/inbox", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    const token = authHeader.slice(7);
+    const auth = req.headers.authorization || "";
+    const token = auth.replace("Bearer ", "");
     const decoded = jwt.verify(token, JWT_SECRET);
     const empId = decoded.emp_id;
 
-    const mails = await inboxColl
-      .find({ toEmpId: empId })
+    const docs = await inboxColl
+      .find({
+        $or: [
+          { toEmpId: empId },
+          { fromEmpId: empId }
+        ]
+      })
       .sort({ timestamp: -1 })
       .toArray();
 
-    res.status(200).json({ inbox: mails });
+    // return under "inbox" key to match Flutter
+    res.status(200).json({ inbox: docs });
   } catch (err) {
-    console.error("GET INBOX ERROR:", err);
+    console.error("GET /api/inbox error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
+// ─── View one mail (with replies) ───
 app.get("/api/inbox/:id", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const token = authHeader.slice(7);
+    const token = auth.slice(7);
     jwt.verify(token, JWT_SECRET);
 
     const mail = await inboxColl.findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id),
+      _id: new mongoose.Types.ObjectId(req.params.id)
     });
     if (!mail) {
       return res.status(404).json({ message: "Mail not found" });
@@ -1264,28 +1271,34 @@ app.get("/api/inbox/:id", async (req, res) => {
   }
 });
 
+// ─── Reply to a mail ───
 app.post("/api/inbox/:id/reply", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const token = authHeader.slice(7);
+    const token = auth.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
-    const replierName = decoded.name;
+    const replierName  = decoded.name;
     const replierEmpId = decoded.emp_id;
-
-    const { reply } = req.body;
+    const { reply }    = req.body;
     if (!reply) {
       return res.status(400).json({ message: "Reply cannot be empty" });
     }
 
+    // push into replies array
     const result = await inboxColl.updateOne(
       { _id: new mongoose.Types.ObjectId(req.params.id) },
       {
         $push: {
-          replies: { replierName, replierEmpId, reply, timestamp: new Date() },
-        },
+          replies: {
+            replierName,
+            replierEmpId,
+            reply,
+            timestamp: new Date()
+          }
+        }
       }
     );
     if (result.matchedCount === 0) {
@@ -1297,6 +1310,8 @@ app.post("/api/inbox/:id/reply", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 
 
