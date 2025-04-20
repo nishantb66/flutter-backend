@@ -1180,6 +1180,7 @@ const inboxColl = portalConnection.useDb("test").collection("inbox");
 // ─── Send a new mail ───
 app.post("/api/send-mail", async (req, res) => {
   try {
+    // 1. Authenticate
     const auth = req.headers.authorization || "";
     if (!auth.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -1187,15 +1188,16 @@ app.post("/api/send-mail", async (req, res) => {
     const token = auth.slice(7);
     const decoded = jwt.verify(token, JWT_SECRET);
     const senderEmpId = decoded.emp_id;
-    const senderName  = decoded.name;
+    const senderName = decoded.name;
     const senderEmail = decoded.email;
 
+    // 2. Extract & validate payload
     const { toEmpId, message } = req.body;
     if (!toEmpId || !message) {
       return res.status(400).json({ message: "Missing toEmpId or message" });
     }
 
-    // verify receiver exists
+    // 3. Verify receiver exists and grab their name/email
     const testDb = portalConnection.useDb("test");
     const receiver = await testDb
       .collection("users")
@@ -1203,24 +1205,30 @@ app.post("/api/send-mail", async (req, res) => {
     if (!receiver) {
       return res.status(400).json({ message: "Incorrect receiver Emp ID" });
     }
+    const toName = receiver.name;
+    const toEmail = receiver.email;
 
-    // save
+    // 4. Insert into inbox collection
     await inboxColl.insertOne({
-      fromEmpId:  senderEmpId,
-      fromName:   senderName,
-      fromEmail:  senderEmail,
-      toEmpId,
-      message,
-      timestamp:  new Date(),
-      replies:    []
+      fromEmpId: senderEmpId,
+      fromName: senderName,
+      fromEmail: senderEmail,
+      toEmpId: toEmpId,
+      toName: toName,
+      toEmail: toEmail,
+      message: message,
+      timestamp: new Date(),
+      replies: [],
     });
 
+    // 5. Respond
     res.status(201).json({ message: "Mail sent successfully" });
   } catch (err) {
     console.error("SEND MAIL ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // ─── List inbox (sent + received) ───
 app.get("/api/inbox", async (req, res) => {
