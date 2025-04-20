@@ -1174,6 +1174,134 @@ app.get("/api/check-profile", async (req, res) => {
   }
 });
 
+inboxColl = portalConnection.useDb("test").collection("inbox");
+
+app.post("/api/send-mail", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const senderEmpId = decoded.emp_id;
+    const senderName = decoded.name;
+    const senderEmail = decoded.email;
+
+    const { toEmpId, message } = req.body;
+    if (!toEmpId || !message) {
+      return res.status(400).json({ message: "Missing toEmpId or message" });
+    }
+
+    // Verify receiver exists
+    const testDb = portalConnection.useDb("test");
+    const receiverDoc = await testDb
+      .collection("users")
+      .findOne({ emp_id: toEmpId });
+    if (!receiverDoc) {
+      return res.status(400).json({ message: "Incorrect receiver Emp ID" });
+    }
+
+    // Save to inbox
+    await inboxColl.insertOne({
+      fromEmpId: senderEmpId,
+      fromName: senderName,
+      fromEmail: senderEmail,
+      toEmpId,
+      message,
+      timestamp: new Date(),
+      replies: [],
+    });
+
+    res.status(201).json({ message: "Mail sent successfully" });
+  } catch (err) {
+    console.error("SEND MAIL ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/api/inbox", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const empId = decoded.emp_id;
+
+    const mails = await inboxColl
+      .find({ toEmpId: empId })
+      .sort({ timestamp: -1 })
+      .toArray();
+
+    res.status(200).json({ inbox: mails });
+  } catch (err) {
+    console.error("GET INBOX ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/api/inbox/:id", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    jwt.verify(token, JWT_SECRET);
+
+    const mail = await inboxColl.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.id),
+    });
+    if (!mail) {
+      return res.status(404).json({ message: "Mail not found" });
+    }
+    res.status(200).json(mail);
+  } catch (err) {
+    console.error("GET MAIL ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.post("/api/inbox/:id/reply", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = authHeader.slice(7);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const replierName = decoded.name;
+    const replierEmpId = decoded.emp_id;
+
+    const { reply } = req.body;
+    if (!reply) {
+      return res.status(400).json({ message: "Reply cannot be empty" });
+    }
+
+    const result = await inboxColl.updateOne(
+      { _id: new mongoose.Types.ObjectId(req.params.id) },
+      {
+        $push: {
+          replies: { replierName, replierEmpId, reply, timestamp: new Date() },
+        },
+      }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Mail not found" });
+    }
+    res.status(200).json({ message: "Reply sent" });
+  } catch (err) {
+    console.error("REPLY ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
+
 // ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
