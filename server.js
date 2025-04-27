@@ -28,6 +28,15 @@ const portal_mongo_uri = process.env.portal_mongo_uri;
 const JWT_SECRET = process.env.JWT_SECRET;
 const EMAIL = process.env.EMAIL;
 const APP_PASS = process.env.APP_PASS;
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE;
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL;
+
+if (!SUPPORT_PHONE || !SUPPORT_EMAIL) {
+  console.error(
+    "Error: Missing support contact details (SUPPORT_PHONE and/or SUPPORT_EMAIL)"
+  );
+  process.exit(1);
+}
 
 if (!MONGODB_URI || !portal_mongo_uri || !JWT_SECRET || !EMAIL || !APP_PASS) {
   console.error(
@@ -1333,9 +1342,6 @@ app.post("/api/inbox/:id/reply", async (req, res) => {
   }
 });
 
-
-
-
 // ------------------------------
 // Team Chats History Endpoint
 // ------------------------------
@@ -1503,6 +1509,15 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
+  });
+});
+
+// ─── Support Info ─────────────────────────────────────────────
+// Returns the current phone & email for Help & Support
+app.get("/api/support-info", (req, res) => {
+  return res.status(200).json({
+    phone: SUPPORT_PHONE,
+    email: SUPPORT_EMAIL,
   });
 });
 
