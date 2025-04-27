@@ -14,6 +14,7 @@ const Feedback = require("./models/Feedback");
 const Groq = require("groq-sdk");
 const http = require("http");
 const { Server } = require("socket.io");
+const { verify } = require("jsonwebtoken");
 
 const app = express();
 
@@ -74,6 +75,15 @@ const transporter = nodemailer.createTransport({
     pass: APP_PASS,
   },
 });
+
+// Helper to pull email out of Bearer token
+function getEmailFromToken(req) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ")) throw new Error("No token");
+  const token = auth.slice(7);
+  const decoded = verify(token, JWT_SECRET);
+  return decoded.email;
+}
 
 // ------------------------------
 // Announcements Endpoints
@@ -1519,6 +1529,43 @@ app.get("/api/support-info", (req, res) => {
     phone: SUPPORT_PHONE,
     email: SUPPORT_EMAIL,
   });
+});
+
+// GET /api/profilepic   → returns { image: dataURL|null }
+app.get("/api/profilepic", async (req, res) => {
+  try {
+    const email = getEmailFromToken(req);
+    const db = portalConnection.useDb("test");
+    const doc = await db
+      .collection("profilepic")
+      .findOne({ email }, { projection: { _id: 0, image: 1 } });
+    return res.status(200).json({ image: doc?.image || null });
+  } catch (err) {
+    console.error("GET /api/profilepic:", err);
+    const status = /token/.test(err.message) ? 401 : 500;
+    return res.status(status).json({ message: err.message });
+  }
+});
+
+// POST /api/profilepic  → { image: dataURL }
+app.post("/api/profilepic", async (req, res) => {
+  try {
+    const email = getEmailFromToken(req);
+    const { image } = req.body;
+    if (!image || !image.startsWith("data:image/"))
+      return res.status(400).json({ message: "Invalid image" });
+
+    const db = portalConnection.useDb("test");
+    await db
+      .collection("profilepic")
+      .updateOne({ email }, { $set: { email, image } }, { upsert: true });
+
+    return res.status(200).json({ message: "Saved" });
+  } catch (err) {
+    console.error("POST /api/profilepic:", err);
+    const status = /token/.test(err.message) ? 401 : 500;
+    return res.status(status).json({ message: err.message });
+  }
 });
 
 // Start the server using the HTTP server
