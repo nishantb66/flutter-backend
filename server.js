@@ -96,7 +96,7 @@ const announcements = [
     title: "Real-Time Notification on Meeting Invites",
     description: "Read more",
     fullText:
-      "We have implemented real-time notifications for meeting invitations. When you are invited to a meeting, you will now receive an instant notification. A green dot will appear above the Advance Assistant floating button on the home screen to indicate a new meeting invite.",
+      "We have implemented real-time notifications for meeting invitations. When you are invited to a meeting, you will now receive an instant notification. The Personal Advance Assistant floating button on the home screen will become Green Bordered. Also you can then ask the personal assitant about your meeting to know more.",
   },
   {
     id: 2,
