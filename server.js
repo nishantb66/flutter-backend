@@ -1390,8 +1390,14 @@ const io = new Server(server, {
   },
 });
 
+const userSockets = {};
+
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+
+  socket.on("register", ({ empId }) => {
+    userSockets[empId] = socket.id;
+  });
 
   // Listen for client joining a team room
   socket.on("joinTeam", async (data) => {
@@ -1565,6 +1571,23 @@ app.post("/api/profilepic", async (req, res) => {
     console.error("POST /api/profilepic:", err);
     const status = /token/.test(err.message) ? 401 : 500;
     return res.status(status).json({ message: err.message });
+  }
+});
+
+/**
+ * POST /api/notify-invite
+ * Body: { toEmpId: string, meeting: object }
+ * Emits a `newMeetingInvite` event to that empId if they're online.
+ */
+app.post("/api/notify-invite", async (req, res) => {
+  const { toEmpId, meeting } = req.body;
+  const targetSocketId = userSockets[toEmpId];
+  if (targetSocketId) {
+    io.to(targetSocketId).emit("newMeetingInvite", { meeting });
+    return res.sendStatus(200);
+  } else {
+    // not connected right now
+    return res.status(404).json({ message: "User not connected" });
   }
 });
 
