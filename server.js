@@ -93,10 +93,10 @@ function getEmailFromToken(req) {
 const announcements = [
   {
     id: 1,
-    title: "New Feature Release",
-    description: "Now user can view tasks in team and tasks section",
+    title: "Real-Time Notification on Meeting Invites",
+    description: "Read more",
     fullText:
-      "We have updated a new feature in team and tasks section where users can now check on the tasks assigned to them by team leader. This feature will enable updates to the user without requirement of laptop or desktop to check on assigned tasks quickly",
+      "We have implemented real-time notifications for meeting invitations. When you are invited to a meeting, you will now receive an instant notification. A green dot will appear above the Advance Assistant floating button on the home screen to indicate a new meeting invite.",
   },
   {
     id: 2,
