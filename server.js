@@ -15,12 +15,15 @@ const Groq = require("groq-sdk");
 const http = require("http");
 const { Server } = require("socket.io");
 const { verify } = require("jsonwebtoken");
+const path = require("path");
 
 const app = express();
 
 // Middleware
 app.use(express.json());
 app.use(cors());
+
+app.use("/static", express.static(path.join(__dirname)));
 
 // Use environment variables
 const PORT = process.env.PORT || 3000;
@@ -96,7 +99,8 @@ const announcements = [
     title: "Real-Time Notification on Meeting Invites",
     description: "Read more",
     fullText:
-      "We have implemented real-time notifications for meeting invitations. When you are invited to a meeting, you will now receive an instant notification. The Personal Advance Assistant floating button on the home screen will become Green Bordered. Also you can then ask the personal assitant about your meeting to know more.",
+      "We have implemented real-time notifications for meeting invitations. When you are invited to a meeting, you will now receive an instant notification. Also you can then ask the personal assitant about your meeting to know more.",
+    imageUrl: "/static/demo.jpg",
   },
   {
     id: 2,
