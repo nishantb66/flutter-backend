@@ -1591,6 +1591,41 @@ app.post("/api/notify-invite", async (req, res) => {
   }
 });
 
+// ─── Pending‐Invites Endpoint ──────────────────────────────────
+// Returns all meetings where the current user is in invitedEmpIds
+app.get("/api/meetings/pending-invites", async (req, res) => {
+  try {
+    // 1) Authenticate
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = auth.slice(7);
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+
+    // 2) Pull out the emp_id
+    const empId = decoded.emp_id;
+
+    // 3) Query for any meetings where this user is invited
+    const pending = await meetingsColl
+      .find({ invitedEmpIds: empId })
+      // optionally, project only the fields your client needs:
+      .project({ _id: 1, startTime: 1, hostName: 1, department: 1 })
+      .toArray();
+
+    // 4) Return as JSON
+    return res.status(200).json({ pendingInvites: pending });
+  } catch (err) {
+    console.error("Error fetching pending invites:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Start the server using the HTTP server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
