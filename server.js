@@ -154,7 +154,7 @@ app.post("/api/register", async (req, res) => {
 // Login endpoint (portal DB 'test' → 'users' collection)
 // ------------------------------
 app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, rememberMe } = req.body;
 
   try {
     // 1. Look up user in the portal DB
@@ -171,6 +171,7 @@ app.post("/api/login", async (req, res) => {
     }
 
     // 3. Sign token with email, name, emp_id, role
+    const expiresIn = rememberMe ? "30d" : "5m";
     const token = jwt.sign(
       {
         email: user.email,
@@ -179,7 +180,7 @@ app.post("/api/login", async (req, res) => {
         role: user.role,
       },
       JWT_SECRET,
-      { expiresIn: "6d" }
+      { expiresIn }
     );
 
     // 4. Return token
