@@ -17,6 +17,9 @@ const { Server } = require("socket.io");
 const { verify } = require("jsonwebtoken");
 const path = require("path");
 
+const { OAuth2Client } = require("google-auth-library");
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 const app = express();
 
 // Middleware
@@ -194,6 +197,65 @@ app.post("/api/login", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// ------------------------------
+// Google Sign-In endpoint
+// ------------------------------
+app.post("/api/google-auth", async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ message: "Missing idToken" });
+    }
+
+    // 1) Verify the Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload.email.toLowerCase();
+    const name  = payload.name || "";
+
+    // 2) Look up (or create) user in portal DB
+    const testDb = portalConnection.useDb("test");
+    const users = testDb.collection("users");
+
+    let user = await users.findOne({ email });
+    if (!user) {
+      // get last E-number
+      const [last] = await users
+        .find({ emp_id: { $regex: /^E\d+$/ } })
+        .sort({ emp_id: -1 })
+        .limit(1)
+        .toArray();
+      const nextNum = last ? parseInt(last.emp_id.slice(1), 10) + 1 : 1;
+      const emp_id = `E${nextNum}`;
+
+      user = { name, email, role: "Executive", emp_id, password: "" };
+      await users.insertOne(user);
+    }
+
+    // 3) Issue your JWT
+    const token = jwt.sign(
+      {
+        email:  user.email,
+        name:   user.name,
+        role:   user.role,
+        emp_id: user.emp_id,
+      },
+      JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    // 4) Return JSON (Flutter will grab token)
+    res.status(200).json({ message: "Login successful", token, name: user.name });
+  } catch (err) {
+    console.error("Google-auth error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 // ------------------------------
 // Forgot password endpoint: send OTP email.
