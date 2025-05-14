@@ -672,6 +672,29 @@ app.get("/api/calendar/today", async (req, res) => {
 });
 
 // ------------------------------
+// Calendar Info Popup Endpoint
+// ------------------------------
+app.get("/api/calendar/info", (req, res) => {
+  // (Optionally you could check the Bearer token here,
+  // but since this is static text you may leave it open.)
+
+  const info = {
+    title: "Calendar Information",
+    body: `
+These events are pulled directly from your portal calendar and show only the tasks,
+meetings, and reminders scheduled for today (the present date). Keeping this text
+on the server lets you tweak or rephrase any of these instructions without forcing
+an app update—just change it here and redeploy!
+
+• All times are displayed in your local time zone (IST).  
+• To modify today’s entries, please update your portal calendar directly.  
+`,
+  };
+
+  return res.status(200).json(info);
+});
+
+// ------------------------------
 // Latest Articles Endpoint
 // ------------------------------
 app.get("/api/articles/latest", async (req, res) => {
